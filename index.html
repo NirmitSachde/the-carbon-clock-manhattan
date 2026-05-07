@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Carbon Clock — Manhattan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<style>
+html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #08080F;
+    font-family: system-ui, sans-serif;
+    color: #F0F0F5;
+}
+#map-container { position: absolute; inset: 0; }
+#title {
+    position: fixed; top: 20px; left: 28px; z-index: 10;
+    font-size: 18px; opacity: 0.7; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="map-container"></div>
+<div id="title">The Carbon Clock — Manhattan</div>
+
+<script>
+// TODO: replace with environment-loaded token before deploy
+const MAPBOX_TOKEN = "YOUR_MAPBOX_TOKEN_HERE";
+const MANHATTAN_CENTER = [-73.9712, 40.7831];
+
+mapboxgl.accessToken = MAPBOX_TOKEN;
+const map = new mapboxgl.Map({
+    container: "map-container",
+    style: "mapbox://styles/mapbox/dark-v11",
+    center: MANHATTAN_CENTER,
+    zoom: 12.2,
+    pitch: 45,
+    bearing: -17.6
+});
+
+map.on("load", () => {
+    // Hide labels, mute roads, darken water/buildings so the city becomes a near-black canvas
+    const style = map.getStyle();
+    style.layers.forEach(layer => {
+        if (layer.type === "symbol") {
+            try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
+        }
+        if (layer.id && layer.id.toLowerCase().includes("road")) {
+            try {
+                map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
+                map.setPaintProperty(layer.id, "line-opacity", 0.35);
+            } catch (_) {}
+        }
+    });
+    try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
+    try {
+        map.setPaintProperty("building", "fill-color", "#141420");
+        map.setPaintProperty("building", "fill-opacity", 0.65);
+    } catch (_) {}
+});
+</script>
+</body>
+</html>
