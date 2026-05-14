@@ -8,14 +8,41 @@
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
 <script src="https://unpkg.com/deck.gl@9.0.16/dist.min.js"></script>
 <style>
+:root {
+    --bg-dark: #08080F;
+    --bg-panel: rgba(8, 8, 15, 0.78);
+    --color-teal: #0ED2F7;
+    --color-amber: #F2A93B;
+    --color-coral: #E74C3C;
+    --color-white: #F0F0F5;
+    --color-muted: rgba(240, 240, 245, 0.4);
+    --color-border: rgba(240, 240, 245, 0.12);
+}
 html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #08080F; font-family: system-ui, sans-serif; color: #F0F0F5; }
+    background: var(--bg-dark); font-family: system-ui, sans-serif; color: var(--color-white); }
 #map-container { position: absolute; inset: 0; }
 #title { position: fixed; top: 20px; left: 28px; z-index: 10;
     font-size: 18px; opacity: 0.7; pointer-events: none; }
 #time-display { position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     z-index: 10; font-size: 48px; font-weight: 500; pointer-events: none;
     font-variant-numeric: tabular-nums; }
+#controls {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 64px;
+    background: var(--bg-panel); backdrop-filter: blur(8px);
+    border-top: 1px solid var(--color-border);
+    display: flex; align-items: center; padding: 0 24px; gap: 16px; z-index: 10;
+}
+button { background: none; border: 1px solid var(--color-border); color: var(--color-white);
+    padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+button:hover { background: rgba(255,255,255,0.06); }
+button.active { color: var(--color-teal); border-color: var(--color-teal); }
+#time-slider { flex: 1; height: 3px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,0.12); }
+#time-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--color-teal); cursor: pointer; box-shadow: 0 0 12px var(--color-teal); }
+.pill { font-size: 11px; padding: 4px 12px; border-radius: 12px;
+    border: 1px solid var(--color-border); cursor: pointer; opacity: 0.5; }
+.pill.active { opacity: 1; background: rgba(255,255,255,0.08); }
 </style>
 </head>
 <body>
@@ -23,30 +50,55 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
 <div id="title">The Carbon Clock — Manhattan</div>
 <div id="time-display">00:00</div>
 
+<div id="controls">
+    <button id="play-btn">Pause</button>
+    <input type="range" id="time-slider" min="0" max="86399" value="28800">
+    <button class="speed-btn active" data-speed="1">1×</button>
+    <button class="speed-btn" data-speed="2">2×</button>
+    <button class="speed-btn" data-speed="5">5×</button>
+    <button class="speed-btn" data-speed="10">10×</button>
+    <span class="pill active" data-layer="trips">Trips</span>
+    <span class="pill active" data-layer="emissions">Emissions</span>
+    <span class="pill active" data-layer="airquality">Air</span>
+</div>
+
 <script>
 const MAPBOX_TOKEN = "YOUR_MAPBOX_TOKEN_HERE";
 const MANHATTAN_CENTER = [-73.9712, 40.7831];
 const SECONDS_IN_DAY = 86400;
 
-const state = { currentTime: 8 * 3600, trips: [] };
+const state = {
+    currentTime: 8 * 3600,
+    playing: true,
+    speed: 1,
+    trips: [], emissions: {}, airquality: [],
+    layerVisibility: { trips: true, emissions: true, airquality: true },
+};
+
+function lerp(a, b, t) { return a + (b - a) * t; }
 
 function intensityToColor(t) {
-    // teal -> amber -> coral
+    t = Math.max(0, Math.min(1, t));
     const teal = [14, 210, 247], amber = [242, 169, 59], coral = [231, 76, 60];
     if (t <= 0.5) {
         const k = t / 0.5;
-        return [Math.round(teal[0] + (amber[0] - teal[0]) * k),
-                Math.round(teal[1] + (amber[1] - teal[1]) * k),
-                Math.round(teal[2] + (amber[2] - teal[2]) * k)];
+        return [Math.round(lerp(teal[0], amber[0], k)),
+                Math.round(lerp(teal[1], amber[1], k)),
+                Math.round(lerp(teal[2], amber[2], k))];
     }
     const k = (t - 0.5) / 0.5;
-    return [Math.round(amber[0] + (coral[0] - amber[0]) * k),
-            Math.round(amber[1] + (coral[1] - amber[1]) * k),
-            Math.round(amber[2] + (coral[2] - amber[2]) * k)];
+    return [Math.round(lerp(amber[0], coral[0], k)),
+            Math.round(lerp(amber[1], coral[1], k)),
+            Math.round(lerp(amber[2], coral[2], k))];
 }
 
 async function loadData() {
-    state.trips = await fetch("data/trips.json").then(r => r.json());
+    const [t, e, a] = await Promise.all([
+        fetch("data/trips.json").then(r => r.json()),
+        fetch("data/emissions.json").then(r => r.json()),
+        fetch("data/airquality.json").then(r => r.json()),
+    ]);
+    state.trips = t; state.emissions = e; state.airquality = a;
 }
 
 mapboxgl.accessToken = MAPBOX_TOKEN;
@@ -55,7 +107,6 @@ const map = new mapboxgl.Map({
     style: "mapbox://styles/mapbox/dark-v11",
     center: MANHATTAN_CENTER, zoom: 12.2, pitch: 45, bearing: -17.6,
 });
-
 map.on("load", () => {
     const style = map.getStyle();
     style.layers.forEach(layer => {
@@ -64,16 +115,13 @@ map.on("load", () => {
         }
     });
     try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
-    try {
-        map.setPaintProperty("building", "fill-color", "#141420");
-        map.setPaintProperty("building", "fill-opacity", 0.65);
-    } catch (_) {}
+    try { map.setPaintProperty("building", "fill-color", "#141420"); } catch (_) {}
 });
-
 const deckOverlay = new deck.MapboxOverlay({ layers: [] });
 map.addControl(deckOverlay);
 
 function getTripsLayer() {
+    if (!state.layerVisibility.trips) return null;
     return new deck.TripsLayer({
         id: "trips", data: state.trips,
         getPath: d => d.path.map(p => [p[0], p[1]]),
@@ -84,22 +132,88 @@ function getTripsLayer() {
     });
 }
 
+function getEmissionsLayer() {
+    if (!state.layerVisibility.emissions) return null;
+    const hour = Math.floor(state.currentTime / 3600) % 24;
+    const data = state.emissions[String(hour)] || [];
+    return new deck.HeatmapLayer({
+        id: "emissions", data,
+        getPosition: d => [d.lng, d.lat],
+        getWeight: d => d.intensity,
+        radiusPixels: 70, intensity: 1.4, threshold: 0.05,
+        colorRange: [
+            [242, 169, 59, 0], [242, 169, 59, 80], [242, 169, 59, 160],
+            [255, 220, 120, 200], [255, 243, 224, 255],
+        ],
+        opacity: 0.55,
+        updateTriggers: { getWeight: [state.currentTime] },
+    });
+}
+
+function getAirQualityLayer() {
+    if (!state.layerVisibility.airquality) return null;
+    const hour = Math.floor(state.currentTime / 3600) % 24;
+    return new deck.ScatterplotLayer({
+        id: "airquality", data: state.airquality,
+        getPosition: d => [d.lng, d.lat],
+        getRadius: d => 200 + d.hourly_intensity[hour] * 900,
+        getFillColor: d => [...intensityToColor(d.hourly_intensity[hour]), 100],
+        getLineColor: d => [...intensityToColor(d.hourly_intensity[hour]), 200],
+        opacity: 1, radiusUnits: "meters", stroked: true, filled: true,
+        lineWidthMinPixels: 1.5,
+        updateTriggers: {
+            getRadius: [state.currentTime],
+            getFillColor: [state.currentTime],
+        },
+    });
+}
+
+function updateLayers() {
+    const layers = [getEmissionsLayer(), getAirQualityLayer(), getTripsLayer()].filter(Boolean);
+    deckOverlay.setProps({ layers });
+}
+
 function updateTimeDisplay() {
     const h = Math.floor(state.currentTime / 3600) % 24;
     const m = Math.floor((state.currentTime % 3600) / 60);
     document.getElementById("time-display").textContent =
         String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    document.getElementById("time-slider").value = Math.floor(state.currentTime);
 }
 
 let lastFrame = performance.now();
 function animate(now) {
     const dt = (now - lastFrame) / 1000;
     lastFrame = now;
-    state.currentTime = (state.currentTime + 60 * dt) % SECONDS_IN_DAY;
-    deckOverlay.setProps({ layers: [getTripsLayer()] });
+    if (state.playing) {
+        state.currentTime = (state.currentTime + state.speed * 60 * dt) % SECONDS_IN_DAY;
+    }
+    updateLayers();
     updateTimeDisplay();
     requestAnimationFrame(animate);
 }
+
+document.getElementById("play-btn").addEventListener("click", () => {
+    state.playing = !state.playing;
+    document.getElementById("play-btn").textContent = state.playing ? "Pause" : "Play";
+});
+document.getElementById("time-slider").addEventListener("input", e => {
+    state.currentTime = parseInt(e.target.value, 10);
+});
+document.querySelectorAll(".speed-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        state.speed = parseInt(btn.dataset.speed, 10);
+        document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+    });
+});
+document.querySelectorAll(".pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+        const layer = pill.dataset.layer;
+        state.layerVisibility[layer] = !state.layerVisibility[layer];
+        pill.classList.toggle("active");
+    });
+});
 
 (async () => {
     await loadData();
