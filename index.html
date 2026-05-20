@@ -4,222 +4,832 @@
 <meta charset="utf-8">
 <title>The Carbon Clock — Manhattan</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="A multi-layer animated visualization of traffic, emissions and air quality in Manhattan over a 24-hour cycle.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
 <script src="https://unpkg.com/deck.gl@9.0.16/dist.min.js"></script>
+
 <style>
 :root {
     --bg-dark: #08080F;
     --bg-panel: rgba(8, 8, 15, 0.78);
+    --bg-panel-light: rgba(20, 20, 32, 0.6);
     --color-teal: #0ED2F7;
     --color-amber: #F2A93B;
     --color-coral: #E74C3C;
     --color-white: #F0F0F5;
     --color-muted: rgba(240, 240, 245, 0.4);
     --color-border: rgba(240, 240, 245, 0.12);
+    --font-heading: 'Space Grotesk', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
-html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: var(--bg-dark); font-family: system-ui, sans-serif; color: var(--color-white); }
-#map-container { position: absolute; inset: 0; }
-#title { position: fixed; top: 20px; left: 28px; z-index: 10;
-    font-size: 18px; opacity: 0.7; pointer-events: none; }
-#time-display { position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
-    z-index: 10; font-size: 48px; font-weight: 500; pointer-events: none;
-    font-variant-numeric: tabular-nums; }
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-dark);
+    font-family: var(--font-body);
+    color: var(--color-white);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+#map-container {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-dark);
+}
+
+/* Hide default Mapbox attribution control to keep the canvas clean.
+   Per Mapbox ToS we still render the attribution in our footer. */
+.mapboxgl-ctrl-attrib, .mapboxgl-ctrl-logo {
+    opacity: 0.35;
+    filter: grayscale(1) brightness(0.6);
+}
+
+#title {
+    position: fixed;
+    top: 24px;
+    left: 32px;
+    font-family: var(--font-heading);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    z-index: 10;
+    pointer-events: none;
+    color: var(--color-white);
+    opacity: 0.7;
+    text-shadow: 0 0 18px rgba(0, 0, 0, 0.9);
+}
+#title .sep {
+    opacity: 0.4;
+    margin: 0 8px;
+}
+#title .subtitle {
+    display: block;
+    font-family: var(--font-body);
+    font-weight: 300;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-top: 4px;
+    opacity: 0.6;
+}
+
+#time-display {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 56px;
+    font-weight: 500;
+    z-index: 10;
+    pointer-events: none;
+    letter-spacing: 2px;
+    color: var(--color-white);
+    text-shadow:
+        0 0 30px rgba(14, 210, 247, 0.25),
+        0 0 60px rgba(14, 210, 247, 0.1);
+    font-variant-numeric: tabular-nums;
+}
+#time-display .ampm {
+    font-size: 18px;
+    opacity: 0.5;
+    margin-left: 10px;
+    letter-spacing: 1px;
+    vertical-align: 6px;
+}
+
+#legend {
+    position: fixed;
+    top: 26px;
+    right: 32px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    font-family: var(--font-body);
+    font-size: 10px;
+    font-weight: 300;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--color-muted);
+}
+#legend .legend-bar {
+    width: 180px;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--color-teal), var(--color-amber), var(--color-coral));
+    box-shadow: 0 0 14px rgba(14, 210, 247, 0.2);
+}
+#legend .legend-labels {
+    width: 180px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    opacity: 0.7;
+}
+
 #controls {
-    position: fixed; bottom: 0; left: 0; right: 0; height: 64px;
-    background: var(--bg-panel); backdrop-filter: blur(8px);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 72px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border-top: 1px solid var(--color-border);
-    display: flex; align-items: center; padding: 0 24px; gap: 16px; z-index: 10;
+    display: flex;
+    align-items: center;
+    padding: 0 32px;
+    gap: 24px;
+    z-index: 10;
 }
-button { background: none; border: 1px solid var(--color-border); color: var(--color-white);
-    padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-button:hover { background: rgba(255,255,255,0.06); }
-button.active { color: var(--color-teal); border-color: var(--color-teal); }
-#time-slider { flex: 1; height: 3px; -webkit-appearance: none; appearance: none;
-    background: rgba(255,255,255,0.12); }
-#time-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px;
-    border-radius: 50%; background: var(--color-teal); cursor: pointer; box-shadow: 0 0 12px var(--color-teal); }
-.pill { font-size: 11px; padding: 4px 12px; border-radius: 12px;
-    border: 1px solid var(--color-border); cursor: pointer; opacity: 0.5; }
-.pill.active { opacity: 1; background: rgba(255,255,255,0.08); }
+
+.icon-btn {
+    background: none;
+    border: 1px solid var(--color-border);
+    color: var(--color-white);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.icon-btn:hover {
+    background: rgba(240, 240, 245, 0.08);
+    border-color: var(--color-teal);
+    box-shadow: 0 0 12px rgba(14, 210, 247, 0.2);
+}
+.icon-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+#time-slider-wrap {
+    flex: 1;
+    position: relative;
+    height: 38px;
+    display: flex;
+    align-items: center;
+}
+#time-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 3px;
+    background: rgba(240, 240, 245, 0.12);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+#time-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-teal);
+    cursor: pointer;
+    box-shadow: 0 0 12px var(--color-teal);
+    transition: transform 0.15s ease;
+}
+#time-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+#time-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-teal);
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 12px var(--color-teal);
+}
+#tick-marks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 6px;
+}
+.tick {
+    width: 1px;
+    height: 8px;
+    background: rgba(240, 240, 245, 0.18);
+}
+.tick.major { height: 12px; background: rgba(240, 240, 245, 0.32); }
+
+#speed-controls {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.speed-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    background: none;
+    border: 1px solid transparent;
+    color: var(--color-muted);
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 36px;
+}
+.speed-btn:hover { color: var(--color-white); }
+.speed-btn.active {
+    color: var(--color-teal);
+    border-color: rgba(14, 210, 247, 0.4);
+    background: rgba(14, 210, 247, 0.06);
+}
+
+#layer-toggles {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.pill {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 400;
+    padding: 6px 12px;
+    border-radius: 14px;
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    opacity: 0.45;
+    transition: all 0.25s ease;
+    user-select: none;
+    letter-spacing: 0.3px;
+}
+.pill:hover { opacity: 0.85; }
+.pill.active {
+    opacity: 1;
+    background: rgba(240, 240, 245, 0.08);
+    border-color: rgba(240, 240, 245, 0.3);
+}
+.pill .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: 1px;
+}
+.pill[data-layer="trips"] .dot       { background: var(--color-teal); }
+.pill[data-layer="emissions"] .dot   { background: var(--color-amber); }
+.pill[data-layer="airquality"] .dot  { background: var(--color-coral); }
+
+#status-line {
+    position: fixed;
+    bottom: 84px;
+    left: 32px;
+    z-index: 10;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    pointer-events: none;
+}
+#status-line .key {
+    color: rgba(240, 240, 245, 0.55);
+}
+
+#attribution {
+    position: fixed;
+    bottom: 84px;
+    right: 32px;
+    z-index: 10;
+    font-family: var(--font-body);
+    font-size: 10px;
+    color: var(--color-muted);
+    pointer-events: auto;
+    text-align: right;
+    line-height: 1.5;
+}
+#attribution a {
+    color: var(--color-muted);
+    text-decoration: none;
+    border-bottom: 1px dotted rgba(240, 240, 245, 0.2);
+}
+#attribution a:hover { color: var(--color-white); }
+
+#token-warning {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    background: rgba(20, 20, 32, 0.95);
+    border: 1px solid var(--color-coral);
+    border-radius: 8px;
+    padding: 28px 32px;
+    max-width: 480px;
+    text-align: center;
+    box-shadow: 0 0 60px rgba(231, 76, 60, 0.2);
+    display: none;
+}
+#token-warning.show { display: block; }
+#token-warning h3 {
+    font-family: var(--font-heading);
+    color: var(--color-coral);
+    margin: 0 0 12px;
+    font-size: 16px;
+    letter-spacing: 0.5px;
+}
+#token-warning p {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-white);
+    opacity: 0.8;
+    margin: 8px 0;
+}
+#token-warning code {
+    font-family: var(--font-mono);
+    background: rgba(0, 0, 0, 0.4);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--color-teal);
+}
+
+@media (max-width: 720px) {
+    #title .subtitle { display: none; }
+    #time-display { font-size: 36px; top: 16px; }
+    #legend { top: auto; bottom: 88px; right: 16px; }
+    #controls { padding: 0 12px; gap: 10px; height: 64px; }
+    #speed-controls .speed-btn { padding: 4px 6px; min-width: 28px; }
+    .pill { font-size: 10px; padding: 4px 8px; }
+    #status-line, #attribution { display: none; }
+}
 </style>
 </head>
 <body>
+
 <div id="map-container"></div>
-<div id="title">The Carbon Clock — Manhattan</div>
-<div id="time-display">00:00</div>
+
+<div id="title">
+    <span>The Carbon Clock</span><span class="sep">·</span><span>Manhattan</span>
+    <span class="subtitle">24 hours of traffic, emissions, air quality</span>
+</div>
+
+<div id="time-display">
+    <span id="time-text">00:00</span><span class="ampm" id="time-ampm">AM</span>
+</div>
+
+<div id="legend">
+    <div class="legend-bar"></div>
+    <div class="legend-labels">
+        <span>Clean</span><span>Moderate</span><span>Intense</span>
+    </div>
+</div>
+
+<div id="status-line">
+    <span class="key">space</span> play/pause &nbsp;·&nbsp;
+    <span class="key">←/→</span> scrub &nbsp;·&nbsp;
+    <span class="key">R</span> reset
+</div>
+
+<div id="attribution">
+    Data: NYC TLC · NYC DOT · OpenAQ · EPA<br>
+    Map: <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener">© Mapbox</a> ·
+    <a href="https://www.openstreetmap.org/about/" target="_blank" rel="noopener">© OpenStreetMap</a>
+</div>
 
 <div id="controls">
-    <button id="play-btn">Pause</button>
-    <input type="range" id="time-slider" min="0" max="86399" value="28800">
-    <button class="speed-btn active" data-speed="1">1×</button>
-    <button class="speed-btn" data-speed="2">2×</button>
-    <button class="speed-btn" data-speed="5">5×</button>
-    <button class="speed-btn" data-speed="10">10×</button>
-    <span class="pill active" data-layer="trips">Trips</span>
-    <span class="pill active" data-layer="emissions">Emissions</span>
-    <span class="pill active" data-layer="airquality">Air</span>
+    <button id="play-btn" class="icon-btn" aria-label="Play/Pause">
+        <svg id="play-icon" viewBox="0 0 16 16"><path d="M3 2 L13 8 L3 14 Z"/></svg>
+        <svg id="pause-icon" viewBox="0 0 16 16" style="display:none"><path d="M3 2 H6 V14 H3 Z M10 2 H13 V14 H10 Z"/></svg>
+    </button>
+    <button id="reset-btn" class="icon-btn" aria-label="Reset to midnight">
+        <svg viewBox="0 0 16 16"><path d="M8 3 V1 L4 4 L8 7 V5 A3 3 0 1 1 5 8 H3 A5 5 0 1 0 8 3 Z"/></svg>
+    </button>
+    <div id="time-slider-wrap">
+        <input type="range" id="time-slider" min="0" max="86399" value="0" step="1">
+        <div id="tick-marks">
+            <div class="tick major"></div>
+            <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+            <div class="tick major"></div>
+            <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+            <div class="tick major"></div>
+            <div class="tick"></div><div class="tick"></div><div class="tick"></div>
+            <div class="tick major"></div>
+        </div>
+    </div>
+    <div id="speed-controls">
+        <button class="speed-btn active" data-speed="1">1×</button>
+        <button class="speed-btn" data-speed="2">2×</button>
+        <button class="speed-btn" data-speed="5">5×</button>
+        <button class="speed-btn" data-speed="10">10×</button>
+    </div>
+    <div id="layer-toggles">
+        <span class="pill active" data-layer="trips"><span class="dot"></span>Trips</span>
+        <span class="pill active" data-layer="emissions"><span class="dot"></span>Emissions</span>
+        <span class="pill active" data-layer="airquality"><span class="dot"></span>Air</span>
+    </div>
+</div>
+
+<div id="token-warning">
+    <h3>Mapbox token missing</h3>
+    <p>Sign up free at <code>account.mapbox.com</code>, copy your default public token, and replace <code>YOUR_MAPBOX_TOKEN_HERE</code> in <code>index.html</code>.</p>
+    <p style="opacity: 0.5; font-size: 11px;">The data layers will still render without a basemap, but the city will be invisible underneath.</p>
 </div>
 
 <script>
+// ====== CONFIG ======
 const MAPBOX_TOKEN = "YOUR_MAPBOX_TOKEN_HERE";
 const MANHATTAN_CENTER = [-73.9712, 40.7831];
 const SECONDS_IN_DAY = 86400;
+const FPS_TARGET = 60;
 
+// Three-tone palette (RGB)
+const TEAL  = [14, 210, 247];
+const AMBER = [242, 169, 59];
+const CORAL = [231, 76, 60];
+
+// ====== STATE ======
 const state = {
-    currentTime: 8 * 3600,
+    currentTime: 8 * 3600,   // start at 8 AM rush so first impression is dramatic
     playing: true,
     speed: 1,
-    trips: [], emissions: {}, airquality: [],
+    sliderActive: false,
+    trips: [],
+    emissions: {},
+    airquality: [],
     layerVisibility: { trips: true, emissions: true, airquality: true },
 };
 
+// ====== COLOR HELPERS ======
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 function intensityToColor(t) {
     t = Math.max(0, Math.min(1, t));
-    const teal = [14, 210, 247], amber = [242, 169, 59], coral = [231, 76, 60];
     if (t <= 0.5) {
         const k = t / 0.5;
-        return [Math.round(lerp(teal[0], amber[0], k)),
-                Math.round(lerp(teal[1], amber[1], k)),
-                Math.round(lerp(teal[2], amber[2], k))];
+        return [
+            Math.round(lerp(TEAL[0], AMBER[0], k)),
+            Math.round(lerp(TEAL[1], AMBER[1], k)),
+            Math.round(lerp(TEAL[2], AMBER[2], k)),
+        ];
     }
     const k = (t - 0.5) / 0.5;
-    return [Math.round(lerp(amber[0], coral[0], k)),
-            Math.round(lerp(amber[1], coral[1], k)),
-            Math.round(lerp(amber[2], coral[2], k))];
+    return [
+        Math.round(lerp(AMBER[0], CORAL[0], k)),
+        Math.round(lerp(AMBER[1], CORAL[1], k)),
+        Math.round(lerp(AMBER[2], CORAL[2], k)),
+    ];
 }
 
+// ====== DATA LOADING ======
 async function loadData() {
-    const [t, e, a] = await Promise.all([
-        fetch("data/trips.json").then(r => r.json()),
-        fetch("data/emissions.json").then(r => r.json()),
-        fetch("data/airquality.json").then(r => r.json()),
-    ]);
-    state.trips = t; state.emissions = e; state.airquality = a;
+    try {
+        const [trips, emissions, aq] = await Promise.all([
+            fetch("data/trips.json").then(r => r.json()),
+            fetch("data/emissions.json").then(r => r.json()),
+            fetch("data/airquality.json").then(r => r.json()),
+        ]);
+        state.trips = trips;
+        state.emissions = emissions;
+        state.airquality = aq;
+        console.log(`Loaded ${trips.length} trips, ${Object.keys(emissions).length} hourly emission snapshots, ${aq.length} air quality stations`);
+    } catch (e) {
+        console.error("Data load failed:", e);
+        alert("Could not load data/*.json. Run `python preprocessing/generate_synthetic_data.py` first.");
+    }
 }
 
-mapboxgl.accessToken = MAPBOX_TOKEN;
-const map = new mapboxgl.Map({
-    container: "map-container",
-    style: "mapbox://styles/mapbox/dark-v11",
-    center: MANHATTAN_CENTER, zoom: 12.2, pitch: 45, bearing: -17.6,
-});
-map.on("load", () => {
-    const style = map.getStyle();
-    style.layers.forEach(layer => {
-        if (layer.type === "symbol") {
-            try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
-        }
-    });
-    try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
-    try { map.setPaintProperty("building", "fill-color", "#141420"); } catch (_) {}
-});
-const deckOverlay = new deck.MapboxOverlay({ layers: [] });
-map.addControl(deckOverlay);
-
+// ====== DECK.GL LAYERS ======
 function getTripsLayer() {
-    if (!state.layerVisibility.trips) return null;
+    if (!state.layerVisibility.trips || state.trips.length === 0) return null;
     return new deck.TripsLayer({
-        id: "trips", data: state.trips,
+        id: "trips",
+        data: state.trips,
         getPath: d => d.path.map(p => [p[0], p[1]]),
         getTimestamps: d => d.path.map(p => p[2]),
         getColor: d => intensityToColor(d.color_intensity),
-        opacity: 0.85, widthMinPixels: 2.5,
-        trailLength: 360, currentTime: state.currentTime,
+        opacity: 0.85,
+        widthMinPixels: 2.5,
+        rounded: true,           // square caps are noticeably cheaper to rasterize
+        trailLength: 360,         // shorter trails => fewer pixels drawn per frame
+        currentTime: state.currentTime,
+        shadowEnabled: false,
+        capRounded: true,
+        jointRounded: true,
     });
 }
 
-function getEmissionsLayer() {
-    if (!state.layerVisibility.emissions) return null;
+// Layer caches: heatmap and AQ are expensive to rebuild every frame.
+// We rebuild them on a throttle (heatmap = ~3fps, AQ = ~10fps) and let
+// TripsLayer carry the per-frame smoothness via its currentTime uniform.
+const HEATMAP_REBUILD_MS = 200;   // ~3fps; heatmap is a slow-changing field
+const AQ_REBUILD_MS = 70;        // ~9fps; pulse remains visually smooth
+
+let _heatmapLayer = null;
+let _heatmapBuiltAt = -Infinity;
+let _heatmapBuiltForVisible = false;
+
+let _aqLayer = null;
+let _aqBuiltAt = -Infinity;
+let _aqBuiltForVisible = false;
+
+function getEmissionsLayer(nowMs) {
+    if (!state.layerVisibility.emissions) {
+        _heatmapBuiltForVisible = false;
+        return null;
+    }
+    if (_heatmapLayer && _heatmapBuiltForVisible && (nowMs - _heatmapBuiltAt) < HEATMAP_REBUILD_MS) {
+        return _heatmapLayer;
+    }
+
     const hour = Math.floor(state.currentTime / 3600) % 24;
-    const data = state.emissions[String(hour)] || [];
-    return new deck.HeatmapLayer({
-        id: "emissions", data,
-        getPosition: d => [d.lng, d.lat],
-        getWeight: d => d.intensity,
-        radiusPixels: 70, intensity: 1.4, threshold: 0.05,
+    const nextHour = (hour + 1) % 24;
+    const fraction = (state.currentTime / 3600) - hour;
+    const cur = state.emissions[String(hour)] || [];
+    const nxt = state.emissions[String(nextHour)] || [];
+
+    const interpolated = new Array(cur.length);
+    for (let i = 0; i < cur.length; i++) {
+        const p = cur[i], np = nxt[i] || p;
+        interpolated[i] = {
+            position: [p.lng, p.lat],
+            weight: p.intensity + (np.intensity - p.intensity) * fraction,
+        };
+    }
+
+    _heatmapLayer = new deck.HeatmapLayer({
+        id: "emissions",
+        data: interpolated,
+        getPosition: d => d.position,
+        getWeight: d => d.weight,
+        radiusPixels: 70,
+        intensity: 1.4,
+        threshold: 0.05,
+        aggregation: "SUM",
         colorRange: [
-            [242, 169, 59, 0], [242, 169, 59, 80], [242, 169, 59, 160],
-            [255, 220, 120, 200], [255, 243, 224, 255],
+            [242, 169, 59,   0],
+            [242, 169, 59,  60],
+            [242, 169, 59, 140],
+            [248, 196, 100, 190],
+            [255, 220, 150, 220],
+            [255, 243, 224, 240],
         ],
         opacity: 0.55,
-        updateTriggers: { getWeight: [state.currentTime] },
     });
+    _heatmapBuiltAt = nowMs;
+    _heatmapBuiltForVisible = true;
+    return _heatmapLayer;
 }
 
-function getAirQualityLayer() {
-    if (!state.layerVisibility.airquality) return null;
+function getAirQualityLayer(nowMs) {
+    if (!state.layerVisibility.airquality || state.airquality.length === 0) {
+        _aqBuiltForVisible = false;
+        return null;
+    }
+    if (_aqLayer && _aqBuiltForVisible && (nowMs - _aqBuiltAt) < AQ_REBUILD_MS) {
+        return _aqLayer;
+    }
+
     const hour = Math.floor(state.currentTime / 3600) % 24;
-    return new deck.ScatterplotLayer({
-        id: "airquality", data: state.airquality,
-        getPosition: d => [d.lng, d.lat],
-        getRadius: d => 200 + d.hourly_intensity[hour] * 900,
-        getFillColor: d => [...intensityToColor(d.hourly_intensity[hour]), 100],
-        getLineColor: d => [...intensityToColor(d.hourly_intensity[hour]), 200],
-        opacity: 1, radiusUnits: "meters", stroked: true, filled: true,
-        lineWidthMinPixels: 1.5,
-        updateTriggers: {
-            getRadius: [state.currentTime],
-            getFillColor: [state.currentTime],
-        },
+    const nextHour = (hour + 1) % 24;
+    const fraction = (state.currentTime / 3600) - hour;
+    const pulse = Math.sin(state.currentTime / 90) * 0.12 + 1;
+
+    // Pre-compute per-station values so the accessor closures don't
+    // re-interpolate per call. Tiny dataset (8 stations) — cheap.
+    const stations = state.airquality.map(d => {
+        const v = lerp(d.hourly_intensity[hour], d.hourly_intensity[nextHour], fraction);
+        const color = intensityToColor(v);
+        return {
+            position: [d.lng, d.lat],
+            radius: (180 + v * 520) * pulse,
+            fill: [color[0], color[1], color[2], 90],
+            stroke: [color[0], color[1], color[2], 200],
+        };
     });
+
+    _aqLayer = new deck.ScatterplotLayer({
+        id: "airquality",
+        data: stations,
+        getPosition: d => d.position,
+        getRadius: d => d.radius,
+        getFillColor: d => d.fill,
+        getLineColor: d => d.stroke,
+        opacity: 1.0,
+        radiusUnits: "meters",
+        stroked: true,
+        filled: true,
+        lineWidthMinPixels: 1.5,
+        radiusMinPixels: 6,
+        radiusMaxPixels: 80,
+    });
+    _aqBuiltAt = nowMs;
+    _aqBuiltForVisible = true;
+    return _aqLayer;
 }
 
-function updateLayers() {
-    const layers = [getEmissionsLayer(), getAirQualityLayer(), getTripsLayer()].filter(Boolean);
-    deckOverlay.setProps({ layers });
+// ====== MAP + DECK SETUP ======
+let map;
+let deckOverlay;
+
+function tokenLooksValid(t) {
+    return typeof t === "string" && t.startsWith("pk.") && t.length > 20;
 }
 
+function initMap() {
+    if (!tokenLooksValid(MAPBOX_TOKEN)) {
+        document.getElementById("token-warning").classList.add("show");
+        // Render Deck.gl alone on a black background (no basemap, no Mapbox dependency)
+        const container = document.getElementById("map-container");
+        const canvas = document.createElement("canvas");
+        canvas.id = "deck-canvas";
+        canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;";
+        container.appendChild(canvas);
+        deckOverlay = new deck.Deck({
+            canvas: canvas,
+            width: "100%",
+            height: "100%",
+            initialViewState: {
+                longitude: MANHATTAN_CENTER[0],
+                latitude: MANHATTAN_CENTER[1],
+                zoom: 12.2,
+                pitch: 45,
+                bearing: -17.6,
+            },
+            controller: true,
+            layers: [],
+        });
+        return;
+    }
+
+    mapboxgl.accessToken = MAPBOX_TOKEN;
+    map = new mapboxgl.Map({
+        container: "map-container",
+        style: "mapbox://styles/mapbox/dark-v11",
+        center: MANHATTAN_CENTER,
+        zoom: 12.2,
+        pitch: 45,
+        bearing: -17.6,
+        antialias: true,
+    });
+
+    map.on("load", () => {
+        // Hide all symbol (label) layers AND any 3D building extrusion layers — those
+        // are GPU-expensive and we want a flat dark canvas anyway.
+        const style = map.getStyle();
+        if (style && style.layers) {
+            style.layers.forEach(layer => {
+                if (layer.type === "symbol") {
+                    try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
+                }
+                if (layer.id && layer.id.toLowerCase().includes("road")) {
+                    try {
+                        map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
+                        map.setPaintProperty(layer.id, "line-opacity", 0.35);
+                    } catch (_) {}
+                }
+            });
+            try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
+            try {
+                map.setPaintProperty("building", "fill-color", "#141420");
+                map.setPaintProperty("building", "fill-opacity", 0.5);
+            } catch (_) {}
+        }
+    });
+
+    deckOverlay = new deck.MapboxOverlay({
+        interleaved: false,
+        layers: [],
+    });
+    map.addControl(deckOverlay);
+}
+
+function updateLayers(nowMs) {
+    nowMs = nowMs || performance.now();
+    const layers = [
+        getEmissionsLayer(nowMs),
+        getAirQualityLayer(nowMs),
+        getTripsLayer(),    // trips on top, rebuilt each frame for smooth currentTime uniform
+    ].filter(Boolean);
+
+    if (deckOverlay && deckOverlay.setProps) {
+        deckOverlay.setProps({ layers });
+    }
+}
+
+// ====== TIME DISPLAY ======
 function updateTimeDisplay() {
-    const h = Math.floor(state.currentTime / 3600) % 24;
-    const m = Math.floor((state.currentTime % 3600) / 60);
-    document.getElementById("time-display").textContent =
-        String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-    document.getElementById("time-slider").value = Math.floor(state.currentTime);
+    const sec = state.currentTime;
+    const h24 = Math.floor(sec / 3600) % 24;
+    const m = Math.floor((sec % 3600) / 60);
+    const ampm = h24 < 12 ? "AM" : "PM";
+    const h12 = ((h24 + 11) % 12) + 1;
+    document.getElementById("time-text").textContent =
+        String(h12).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    document.getElementById("time-ampm").textContent = ampm;
+
+    if (!state.sliderActive) {
+        document.getElementById("time-slider").value = Math.floor(sec);
+    }
 }
 
+// ====== ANIMATION LOOP ======
 let lastFrame = performance.now();
 function animate(now) {
-    const dt = (now - lastFrame) / 1000;
+    const dt = (now - lastFrame) / 1000;  // seconds since last frame
     lastFrame = now;
+
     if (state.playing) {
+        // 1× speed = 1 minute of simulated time per 1 second of real time
+        // -> 24h cycle in 24 minutes at 1×. (At 10× = 2.4 min.)
         state.currentTime = (state.currentTime + state.speed * 60 * dt) % SECONDS_IN_DAY;
     }
-    updateLayers();
+
+    updateLayers(now);
     updateTimeDisplay();
     requestAnimationFrame(animate);
 }
 
-document.getElementById("play-btn").addEventListener("click", () => {
-    state.playing = !state.playing;
-    document.getElementById("play-btn").textContent = state.playing ? "Pause" : "Play";
-});
-document.getElementById("time-slider").addEventListener("input", e => {
-    state.currentTime = parseInt(e.target.value, 10);
-});
-document.querySelectorAll(".speed-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-        state.speed = parseInt(btn.dataset.speed, 10);
-        document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-    });
-});
-document.querySelectorAll(".pill").forEach(pill => {
-    pill.addEventListener("click", () => {
-        const layer = pill.dataset.layer;
-        state.layerVisibility[layer] = !state.layerVisibility[layer];
-        pill.classList.toggle("active");
-    });
-});
+// ====== CONTROLS ======
+function setPlaying(playing) {
+    state.playing = playing;
+    document.getElementById("play-icon").style.display = playing ? "none" : "";
+    document.getElementById("pause-icon").style.display = playing ? "" : "none";
+}
 
-(async () => {
+function setupControls() {
+    document.getElementById("play-btn").addEventListener("click", () => setPlaying(!state.playing));
+    document.getElementById("reset-btn").addEventListener("click", () => {
+        state.currentTime = 0;
+        updateTimeDisplay();
+    });
+
+    const slider = document.getElementById("time-slider");
+    slider.addEventListener("mousedown", () => { state.sliderActive = true; });
+    slider.addEventListener("touchstart", () => { state.sliderActive = true; });
+    const releaseSlider = () => { state.sliderActive = false; };
+    slider.addEventListener("mouseup", releaseSlider);
+    slider.addEventListener("touchend", releaseSlider);
+    slider.addEventListener("input", (e) => {
+        state.currentTime = parseInt(e.target.value, 10);
+    });
+
+    document.querySelectorAll(".speed-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            state.speed = parseInt(btn.dataset.speed, 10);
+            document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+        });
+    });
+
+    document.querySelectorAll(".pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+            const layer = pill.dataset.layer;
+            state.layerVisibility[layer] = !state.layerVisibility[layer];
+            pill.classList.toggle("active");
+        });
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT") return;
+        if (e.code === "Space") {
+            e.preventDefault();
+            setPlaying(!state.playing);
+        } else if (e.code === "ArrowRight") {
+            state.currentTime = Math.min(SECONDS_IN_DAY - 1, state.currentTime + 900);
+        } else if (e.code === "ArrowLeft") {
+            state.currentTime = Math.max(0, state.currentTime - 900);
+        } else if (e.key === "r" || e.key === "R") {
+            state.currentTime = 0;
+        }
+    });
+}
+
+// ====== INIT ======
+async function main() {
+    initMap();
     await loadData();
+    setupControls();
+    setPlaying(state.playing);
     lastFrame = performance.now();
     requestAnimationFrame(animate);
-})();
+}
+
+main();
 </script>
 </body>
 </html>
