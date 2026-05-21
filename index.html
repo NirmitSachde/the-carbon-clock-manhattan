@@ -452,7 +452,7 @@ html, body {
 
 <script>
 // ====== CONFIG ======
-const MAPBOX_TOKEN = "YOUR_MAPBOX_TOKEN_HERE";
+const MAPBOX_TOKEN = "pk.eyJ1IjoibmlybWl0c2FjaGRlIiwiYSI6ImNtcGczZHIyMTBrcmIyc3Bsc3RzNzF3YjQifQ.tXOt7w86BK9BhGvXZiiMhw";
 const MANHATTAN_CENTER = [-73.9712, 40.7831];
 const SECONDS_IN_DAY = 86400;
 const FPS_TARGET = 60;
@@ -523,21 +523,21 @@ function getTripsLayer() {
         getTimestamps: d => d.path.map(p => p[2]),
         getColor: d => intensityToColor(d.color_intensity),
         opacity: 0.85,
-        widthMinPixels: 2.5,
-        rounded: true,           // square caps are noticeably cheaper to rasterize
-        trailLength: 360,         // shorter trails => fewer pixels drawn per frame
+        widthMinPixels: 2,
+        rounded: false,           // square caps are noticeably cheaper to rasterize
+        trailLength: 240,         // shorter trails => fewer pixels drawn per frame
         currentTime: state.currentTime,
         shadowEnabled: false,
-        capRounded: true,
-        jointRounded: true,
+        capRounded: false,
+        jointRounded: false,
     });
 }
 
 // Layer caches: heatmap and AQ are expensive to rebuild every frame.
 // We rebuild them on a throttle (heatmap = ~3fps, AQ = ~10fps) and let
 // TripsLayer carry the per-frame smoothness via its currentTime uniform.
-const HEATMAP_REBUILD_MS = 200;   // ~3fps; heatmap is a slow-changing field
-const AQ_REBUILD_MS = 70;        // ~9fps; pulse remains visually smooth
+const HEATMAP_REBUILD_MS = 350;   // ~3fps; heatmap is a slow-changing field
+const AQ_REBUILD_MS = 110;        // ~9fps; pulse remains visually smooth
 
 let _heatmapLayer = null;
 let _heatmapBuiltAt = -Infinity;
@@ -576,8 +576,8 @@ function getEmissionsLayer(nowMs) {
         data: interpolated,
         getPosition: d => d.position,
         getWeight: d => d.weight,
-        radiusPixels: 70,
-        intensity: 1.4,
+        radiusPixels: 45,
+        intensity: 1.2,
         threshold: 0.05,
         aggregation: "SUM",
         colorRange: [
@@ -663,11 +663,12 @@ function initMap() {
             canvas: canvas,
             width: "100%",
             height: "100%",
+            useDevicePixelRatio: 1,
             initialViewState: {
                 longitude: MANHATTAN_CENTER[0],
                 latitude: MANHATTAN_CENTER[1],
                 zoom: 12.2,
-                pitch: 45,
+                pitch: 0,
                 bearing: -17.6,
             },
             controller: true,
@@ -682,9 +683,11 @@ function initMap() {
         style: "mapbox://styles/mapbox/dark-v11",
         center: MANHATTAN_CENTER,
         zoom: 12.2,
-        pitch: 45,
+        pitch: 0,                    // top-down: way cheaper than 45° (no 3D buildings)
         bearing: -17.6,
-        antialias: true,
+        antialias: false,            // saves a multisample pass per frame
+        preserveDrawingBuffer: false,
+        maxPitch: 60,                // user can still tilt by dragging if they want
     });
 
     map.on("load", () => {
@@ -693,7 +696,7 @@ function initMap() {
         const style = map.getStyle();
         if (style && style.layers) {
             style.layers.forEach(layer => {
-                if (layer.type === "symbol") {
+                if (layer.type === "symbol" || layer.type === "fill-extrusion") {
                     try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
                 }
                 if (layer.id && layer.id.toLowerCase().includes("road")) {
@@ -714,6 +717,10 @@ function initMap() {
     deckOverlay = new deck.MapboxOverlay({
         interleaved: false,
         layers: [],
+        // Critical on retina: render at logical pixel ratio, not 2×/3×. Cuts GPU
+        // pixel-shading load by 4–9× with almost no visible difference for
+        // these soft layers.
+        useDevicePixelRatio: 1,
     });
     map.addControl(deckOverlay);
 }

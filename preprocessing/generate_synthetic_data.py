@@ -116,7 +116,7 @@ def hav_distance_km(lng1, lat1, lng2, lat2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def generate_trips(total_target=4000):
+def generate_trips(total_target=2200):
     """Generate ~total_target trips, distributed across the 24h day per HOURLY_DEMAND."""
     # Convert demand curve to trip counts
     weight_sum = sum(HOURLY_DEMAND)
@@ -229,7 +229,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Generating taxi trips...")
-    trips = generate_trips(total_target=4000)
+    trips = generate_trips(total_target=2200)
     (out_dir / "trips.json").write_text(json.dumps(trips, separators=(",", ":")))
     print(f"  -> {len(trips)} trips, {(out_dir / 'trips.json').stat().st_size / 1024:.1f} KB")
 
