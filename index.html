@@ -7,6 +7,12 @@
 <meta name="description" content="A multi-layer animated visualization of traffic, emissions and air quality in Manhattan over a 24-hour cycle.">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta name="theme-color" content="#08080F">
+<!-- Browsers default to 'strict-origin-when-cross-origin', which strips the
+     path from the Referer header on cross-origin requests. That makes Mapbox
+     URL restrictions like 'https://user.github.io/repo' never match (the
+     header arrives as just 'https://user.github.io/'). We send the full URL
+     to HTTPS endpoints so per-path restrictions work. -->
+<meta name="referrer" content="no-referrer-when-downgrade">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -438,6 +444,17 @@ html, body {
     text-transform: uppercase;
     min-height: 14px;
 }
+#loader-hint {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 300;
+    color: rgba(240, 240, 245, 0.35);
+    margin-top: 18px;
+    text-align: center;
+    line-height: 1.7;
+    max-width: 340px;
+    font-style: italic;
+}
 #perf-badge {
     position: fixed;
     bottom: 90px;
@@ -574,6 +591,7 @@ html, body {
     <div id="loader-tagline">Manhattan · 24 hours</div>
     <div id="loader-progress"><div id="loader-bar"></div></div>
     <div id="loader-status">Initializing…</div>
+    <div id="loader-hint">This takes a few seconds the first time.<br>Loading 2,400 taxi trips, 90 emission cells, 8 air-quality stations.</div>
 </div>
 
 <div id="map-container"></div>
