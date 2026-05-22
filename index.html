@@ -1117,7 +1117,12 @@ const state = {
 // Available data tiers. The list is the single source of truth for both
 // the dropdown labels and the file URLs we fetch.
 // `warn` triggers a confirm dialog before loading (large download).
-const RELEASES_BASE = "https://github.com/NirmitSachde/the-carbon-clock-manhattan/releases/download/v1.0-data";
+//
+// The 2 M tier lives on Hugging Face Datasets because GitHub Releases now
+// serves files through release-assets.githubusercontent.com which doesn't
+// set Access-Control-Allow-Origin, so the browser blocks cross-origin
+// fetch from Pages. HF Datasets does set CORS headers correctly.
+const HF_DATASET = "https://huggingface.co/datasets/NirmitSachde/carbon-clock-data/resolve/main";
 const TIERS = {
     "25k":  {
         label: "Quick · 25 K",
@@ -1140,9 +1145,9 @@ const TIERS = {
     },
     "2m":   {
         label: "Everything · 2.9 M",
-        trips: RELEASES_BASE + "/trips-2m.bin",
-        size_mb: 270,
-        warn: "About 270 MB — every Manhattan yellow-taxi ride in Jan 2025. May take 30–60 sec on broadband. Continue?",
+        trips: HF_DATASET + "/trips-2m.bin",
+        size_mb: 257,
+        warn: "About 257 MB — every Manhattan yellow-taxi ride in Jan 2025. May take 30–90 sec on broadband. Continue?",
     },
 };
 
