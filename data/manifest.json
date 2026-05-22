@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-22 16:09 UTC",
+  "generated_at": "2026-05-22 18:25 UTC",
   "layers": [
     {
       "key": "trips",
@@ -10,7 +10,7 @@
         "Total in source month": "3,475,226 rides",
         "Manhattan PU + DO": "2,933,898 rides",
         "Sampling": "Stratified random sample, balanced across 24 hours",
-        "Available tiers": "25k (25,008 trips), 100k (100,008 trips), 500k (484,155 trips)",
+        "Available tiers": "25k (25,008 trips), 100k (100,008 trips), 500k (484,155 trips), 2m (2,933,898 trips)",
         "Trip geometry": "Snapped to OpenStreetMap roads via OSRM v5",
         "Path simplification": "Douglas\u2013Peucker, 30 m tolerance",
         "Coordinates": "Zone centroids from TLC taxi-zone shapefile (EPSG:2263 \u2192 WGS84)",
