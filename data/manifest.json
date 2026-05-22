@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-05-22 16:09 UTC",
+  "layers": [
+    {
+      "key": "trips",
+      "title": "Yellow taxi trips",
+      "source": "NYC Taxi & Limousine Commission \u00b7 Yellow Taxi Trip Records, January 2025",
+      "source_url": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+      "facts": {
+        "Total in source month": "3,475,226 rides",
+        "Manhattan PU + DO": "2,933,898 rides",
+        "Sampling": "Stratified random sample, balanced across 24 hours",
+        "Available tiers": "25k (25,008 trips), 100k (100,008 trips), 500k (484,155 trips)",
+        "Trip geometry": "Snapped to OpenStreetMap roads via OSRM v5",
+        "Path simplification": "Douglas\u2013Peucker, 30 m tolerance",
+        "Coordinates": "Zone centroids from TLC taxi-zone shapefile (EPSG:2263 \u2192 WGS84)",
+        "Format": ".bin (custom CCM1, ~40% the size of JSON, parsed as typed arrays)"
+      },
+      "notes": "Each trail starts where a real taxi picked up and ends where it dropped off. The line in between is the actual driving route OSRM computed across OpenStreetMap."
+    },
+    {
+      "key": "emissions",
+      "title": "Traffic-based CO\u2082 heatmap",
+      "source": "NYC DOT \u00b7 Automated Traffic Volume Counts (NYC Open Data)",
+      "source_url": "https://data.cityofnewyork.us/Transportation/Automated-Traffic-Volume-Counts/7ym2-wayt",
+      "facts": {
+        "Records scanned": "1,875,154 total count records",
+        "After Manhattan + year \u2265 2020 filter": "93,017 records",
+        "Unique stations": "104",
+        "Hourly snapshots": "24 (one per hour of day)",
+        "Emission factor": "EPA fleet-mix (75 % car + 15 % light truck + 8 % heavy truck + 2 % bus \u2192 558 g CO\u2082/mi)",
+        "Geometry": "WktGeom POINT in EPSG:2263 \u2192 WGS84"
+      },
+      "notes": "Each station's hourly mean vehicle volume is converted to grams of CO\u2082 using the EPA fleet-mix factor. The heatmap interpolates between adjacent hour snapshots so it morphs continuously through the day instead of snapping on the hour."
+    },
+    {
+      "key": "airquality",
+      "title": "Air-quality monitors",
+      "source": "EPA Air Quality System (AQS) \u00b7 Hourly criteria pollutants, 2025",
+      "source_url": "https://aqs.epa.gov/aqsweb/airdata/download_files.html",
+      "facts": {
+        "Pollutants": "NO2, PM2.5",
+        "Federal monitors (NYC bbox)": 5,
+        "PM2.5 readings scanned": "26,940",
+        "NO\u2082 readings scanned": "11,145",
+        "Aggregation": "Per-site median per hour-of-day (typical-day profile)",
+        "Intensity scale": "Per-station 10th\u201390th percentile stretch (reveals each monitor's own daily cycle even when the absolute \u03bcg/m\u00b3 values are low)",
+        "Absolute values shown": "Stats panel reports the raw \u03bcg/m\u00b3 and ppb \u2014 unmodified."
+      },
+      "notes": "EPA's regulated federal network is intentionally sparse \u2014 only a handful of stations cover all 5 boroughs at hourly resolution. PurpleAir community sensors would expand this by 20\u201350\u00d7 once an API key is integrated."
+    },
+    {
+      "key": "basemap",
+      "title": "Basemap",
+      "source": "CARTO Dark Matter \u00b7 MapLibre GL JS",
+      "source_url": "https://carto.com/basemaps/",
+      "facts": {
+        "Engine": "MapLibre GL JS 4.7 (open source, no token)",
+        "Style": "CARTO Dark Matter vector tiles",
+        "Auth required": "None",
+        "Rate limit": "75 K mapviews/month free (non-commercial)"
+      },
+      "notes": "Replaced Mapbox in v8 to eliminate token + URL-restriction headaches for any visitor."
+    }
+  ]
+}

@@ -7,3 +7,17 @@ node_modules/
 # Raw downloaded source data (regenerable via the preprocessing scripts).
 # These can be hundreds of megabytes; they don't belong in git.
 raw/
+
+# Private project report — never publish.
+PROJECT_REPORT_v1.md
+PROJECT_REPORT_*.md
+
+# Intermediate trip files. Only the compact .bin files ship; the .raw.json
+# (pre-OSRM) and full .json (pre-pack) versions are too big and redundant.
+data/tiers/*.raw.json
+data/tiers/*.json
+# 2M tier is hosted on GitHub Releases, not committed.
+data/tiers/trips-2m.bin
+# Top-level trips.* are legacy from before tiering; superseded by data/tiers/.
+data/trips.json
+data/trips.bin
