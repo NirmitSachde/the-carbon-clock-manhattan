@@ -50,22 +50,33 @@ def _peek_json_trips(p: Path):
 
 
 def tier_facts():
+    # The 2M tier file is hosted on Hugging Face (too big for GitHub Pages
+    # CORS) — so its .bin won't be present locally. The trip count is fixed
+    # though (every Jan-2025 Manhattan ride), so we hardcode the fallback.
+    HF_2M_FACTS = {
+        "trips": 2933898,
+        "waypoints": 20489760,
+        "bin_kb": 263035,
+        "json_kb": 0,
+        "remote": "https://huggingface.co/datasets/NirmitSachde/carbon-clock-data",
+    }
     out = {}
     for label in ["25k", "100k", "500k", "2m"]:
         bin_path = TIERS_DIR / f"trips-{label}.bin"
         json_path = TIERS_DIR / f"trips-{label}.json"
-        size_kb = _file_size_kb(bin_path) or _file_size_kb(json_path)
         counts = _peek_bin_header(bin_path) or _peek_json_trips(json_path)
         if counts:
             n_trips, n_points = counts
+            out[label] = {
+                "trips": n_trips,
+                "waypoints": n_points,
+                "bin_kb": _file_size_kb(bin_path),
+                "json_kb": _file_size_kb(json_path),
+            }
+        elif label == "2m":
+            out[label] = dict(HF_2M_FACTS)
         else:
-            n_trips, n_points = 0, 0
-        out[label] = {
-            "trips": n_trips,
-            "waypoints": n_points,
-            "bin_kb": _file_size_kb(bin_path),
-            "json_kb": _file_size_kb(json_path),
-        }
+            out[label] = {"trips": 0, "waypoints": 0, "bin_kb": 0, "json_kb": 0}
     return out
 
 

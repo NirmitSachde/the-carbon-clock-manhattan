@@ -20,7 +20,7 @@ Inspired by the MIT Senseable City Lab's Manhattan emissions study published in 
 
 Three synchronized data layers, all real public data, on a dark map of Manhattan:
 
-- **Taxi Trails** — 2,400 January 2025 yellow-taxi trips sampled from the NYC TLC dataset (3.47M total rides that month, ~2.93M after Manhattan filtering, stratified by hour of day). Trip geometry is snapped to actual OpenStreetMap roads via OSRM.
+- **Taxi Trails** — January 2025 yellow-taxi trips from the NYC TLC dataset (3.47M total rides that month, 2.93M after Manhattan filtering), stratified by hour of day and shipped at **four selectable tiers — 25 K / 100 K / 500 K / 2.9 M**. Trip geometry is snapped to actual OpenStreetMap roads via OSRM.
 - **Emission Heatmap** — 104 NYC DOT Automated Traffic Volume Count stations across Manhattan, hourly mean vehicle volumes converted to CO₂ intensity using EPA fleet-mix emission factors.
 - **Air Quality Halos** — **56 NYC monitors**: 5 EPA AQS federal regulatory stations (PM2.5 parameter 88101 + NO₂ parameter 42602, 38,085 hourly readings from 2025) plus 51 PurpleAir community sensors (atmospheric PM2.5, 60-min averages over the last 7 days). Shown as halos that change color and radius with each station's typical-day hourly profile.
 
@@ -79,54 +79,53 @@ At 1× speed, a full 24-hour cycle takes 24 minutes (one simulated minute per re
 
 ## Real Data Sources
 
-The preprocessing scripts under `preprocessing/` consume the same public datasets the proposal describes:
+Every layer is real public data. Nothing is mocked or synthesized.
 
-| Layer       | Source                                                                                                  |
-|-------------|---------------------------------------------------------------------------------------------------------|
-| Taxi trips  | [NYC TLC Yellow Taxi Trip Records](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)         |
-| Emissions   | [NYC DOT Automated Traffic Volume Counts](https://data.cityofnewyork.us/Transportation/Automated-Traffic-Volume-Counts/7ym2-wayt) + [EPA emission factors](https://www.epa.gov/) |
-| Air quality | [OpenAQ API](https://docs.openaq.org/) (covers EPA AirNow stations)                                     |
-| Basemap     | [Mapbox GL JS](https://www.mapbox.com/) (free tier)                                                     |
+| Layer       | Source                                                                                                                                                                                  |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Taxi trips  | [NYC TLC Yellow Taxi Trip Records](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) (January 2025: 3,475,226 source records → 2,933,898 Manhattan-only)                       |
+| Emissions   | [NYC DOT Automated Traffic Volume Counts](https://data.cityofnewyork.us/Transportation/Automated-Traffic-Volume-Counts/7ym2-wayt) + [EPA fleet-mix factors](https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle) |
+| Air quality | [EPA AQS hourly criteria pollutants](https://aqs.epa.gov/aqsweb/airdata/download_files.html) (PM2.5 + NO₂, federal regulatory) + [PurpleAir API](https://api.purpleair.com/) (community PM2.5) |
+| Basemap     | [CARTO Dark Matter](https://carto.com/basemaps/) via [MapLibre GL JS](https://maplibre.org/) (no token, no API key)                                                                       |
+| Roads       | [OpenStreetMap NY State extract](https://download.geofabrik.de/north-america/us/new-york.html) (used by OSRM for trip-geometry snapping)                                                  |
 
 ### Running the real pipeline
 
 ```bash
 pip install -r preprocessing/requirements.txt
 
-# 1. Download yellow_tripdata_YYYY-MM.parquet from TLC, plus a zone_centroids.csv
-#    (built from the TLC taxi zone shapefile: data.cityofnewyork.us/.../d3c1-ddgc)
-python3 preprocessing/process_taxi.py \
-    --parquet yellow_tripdata_2025-01.parquet \
-    --centroids zone_centroids.csv
+# 0. One-time: set up local OSRM via Docker (NY State OSM extract).
+#    Takes ~12 min on first run; idempotent on re-runs.
+preprocessing/setup_osrm.sh
 
-# 2. Download Automated_Traffic_Volume_Counts.csv from NYC Open Data
-python3 preprocessing/process_emissions.py \
-    --csv Automated_Traffic_Volume_Counts.csv \
-    --manhattan-only
+# 1. Download the source files (TLC parquet, NYC DOT CSV, EPA AQS bulk).
+#    URLs are in process_taxi.py / process_emissions.py / process_airquality.py.
 
-# 3. Set OPENAQ_API_KEY env var, then query the OpenAQ v3 API
-export OPENAQ_API_KEY=your_key
+# 2. Generate stratified tier samples from the TLC parquet.
+python3 preprocessing/build_zone_centroids.py
+python3 preprocessing/build_trip_tiers.py
+# Snap each tier through local OSRM (parallel, ~5–80 min depending on tier size).
+preprocessing/run_full_pipeline.sh   # snaps + Douglas–Peucker simplifies + packs to .bin
+
+# 3. Emissions (CO₂ heatmap from NYC DOT counts).
+python3 preprocessing/process_emissions.py
+
+# 4. Air quality (EPA AQS + PurpleAir).
 python3 preprocessing/process_airquality.py
+PURPLEAIR_API_KEY=your_key python3 preprocessing/process_purpleair.py
+
+# 5. Regenerate the data-source manifest the About modal reads.
+python3 preprocessing/build_manifest.py
 ```
 
-Each script writes its output to `data/` and is independent — you can re-run one without re-running the others.
+Each preprocessor writes to `data/` and is independent — re-run any one without redoing the others.
 
-### Optional: snap trips to real OSM roads
+### Refresh-on-schedule (GitHub Actions)
 
-The synthetic generator builds trips that follow a model of Manhattan's
-avenue + cross-street grid. For pixel-perfect alignment with the basemap
-road network, run the OSRM snapping pass:
-
-```bash
-python3 preprocessing/snap_trips_to_roads.py
-# Or test against a subset first:
-python3 preprocessing/snap_trips_to_roads.py --max 100
-```
-
-This replaces each trip's path with the actual driving route between
-pickup and dropoff, snapped to real OSM roads via the public OSRM demo
-server. Failures fall back to the synthetic path so the file is always
-valid. Expect ~30-60 minutes to snap 2400 trips due to OSRM's rate limit.
+`.github/workflows/refresh-purpleair.yml` runs every Monday at 03:00 UTC,
+re-pulls the rolling 7-day PurpleAir window with the `PURPLEAIR_API_KEY`
+repo secret, rebuilds `manifest.json`, and pushes back to `main` only if
+the data actually changed. No manual intervention required.
 
 ---
 
@@ -134,24 +133,38 @@ valid. Expect ~30-60 minutes to snap 2400 trips due to OSRM's rate limit.
 
 ```
 the-carbon-clock-manhattan/
-├── index.html                       # full visualization (HTML + CSS + JS, no build tools)
+├── index.html                       # full visualization (HTML + CSS + JS, no build step)
 ├── data/
-│   ├── trips.json                   # sampled taxi trip paths
-│   ├── emissions.json               # 24 hourly emission snapshots
-│   └── airquality.json              # AQ stations + 24h profiles
+│   ├── manifest.json                # data provenance shown in the About modal (auto-generated)
+│   ├── emissions.json               # 104 NYC DOT stations × 24 hourly snapshots
+│   ├── airquality.json              # 5 EPA + 51 PurpleAir monitors × 24-hour profiles
+│   └── tiers/
+│       ├── trips-25k.bin            # 25,008 OSRM-snapped trips · 2.3 MB
+│       ├── trips-100k.bin           # 100,008 trips · 9.2 MB
+│       └── trips-500k.bin           # 484,155 trips · 44 MB
+│       # trips-2m.bin (2,933,898 trips, 257 MB) hosted on Hugging Face Datasets
 ├── preprocessing/
-│   ├── generate_synthetic_data.py   # stdlib-only synthetic generator; routes trips along a Manhattan grid model
-│   ├── snap_trips_to_roads.py       # optional: replace synthetic paths with real OSM road geometry via OSRM
-│   ├── process_taxi.py              # TLC Parquet -> trips.json
-│   ├── process_emissions.py         # NYC DOT CSV -> emissions.json
-│   ├── process_airquality.py        # OpenAQ v3 API -> airquality.json
+│   ├── setup_osrm.sh                # Docker pull + extract/partition/customize OSRM
+│   ├── run_full_pipeline.sh         # end-to-end refresh: snap all tiers + pack + manifest
+│   ├── build_zone_centroids.py      # TLC taxi-zone shapefile → centroid CSV
+│   ├── build_trip_tiers.py          # TLC parquet → tier-stratified raw JSONs
+│   ├── snap_trips_local.py          # asyncio + 48 parallel OSRM workers
+│   ├── simplify_trips.py            # Douglas–Peucker path simplification
+│   ├── pack_trips_binary.py         # JSON → custom CCM1 .bin
+│   ├── process_emissions.py         # NYC DOT WKT POINTs → emissions.json
+│   ├── process_airquality.py        # EPA AQS bulk PM2.5 + NO₂ → airquality.json
+│   ├── process_purpleair.py         # PurpleAir REST API → merged into airquality.json
+│   ├── build_manifest.py            # writes data/manifest.json
 │   └── requirements.txt
-└── screenshots/                     # captures of key visual moments
+├── docs/og-image.png                # 1280×640 social-preview image
+├── .github/workflows/               # cron-refresh PurpleAir weekly
+├── ATTRIBUTION.md                   # data licensing + library credits
+└── LICENSE                          # MIT
 ```
 
 **Frontend stack:**
 - [Deck.gl 9](https://deck.gl/) — `TripsLayer`, `HeatmapLayer`, `ScatterplotLayer`
-- [Mapbox GL JS 3](https://docs.mapbox.com/mapbox-gl-js/) — dark basemap with custom paint overrides
+- [MapLibre GL JS 4](https://maplibre.org/maplibre-gl-js/) — open-source, no token — paired with `deck.MapboxOverlay`
 - Vanilla HTML/CSS/JS, no React, no build step. All libraries loaded from CDN.
 
 **The master-clock pattern:** every layer reads `state.currentTime` (seconds since midnight). The animation loop advances `currentTime` by `speed * 60 * dt` each frame. Each layer interpolates between the two nearest hourly snapshots so transitions are smooth, not stepped.
