@@ -91,8 +91,12 @@ def aq_facts():
         return {}
     data = json.loads(p.read_text())
     pollutants = sorted({pl for s in data for pl in (s.get("pollutants") or [])})
+    epa = sum(1 for s in data if s.get("source") == "epa-aqs")
+    pa  = sum(1 for s in data if s.get("source") == "purpleair")
     return {
         "stations": len(data),
+        "epa_stations": epa,
+        "purpleair_stations": pa,
         "pollutants": ", ".join(pollutants) if pollutants else "PM2.5",
         "file_kb": _file_size_kb(p),
     }
@@ -148,18 +152,21 @@ def main():
             {
                 "key": "airquality",
                 "title": "Air-quality monitors",
-                "source": "EPA Air Quality System (AQS) · Hourly criteria pollutants, 2025",
+                "source": "EPA AQS (federal, regulatory) + PurpleAir (community, low-cost) · 2025",
                 "source_url": "https://aqs.epa.gov/aqsweb/airdata/download_files.html",
                 "facts": {
                     "Pollutants": aq.get("pollutants", "PM2.5"),
-                    "Federal monitors (NYC bbox)": aq.get("stations", "–"),
-                    "PM2.5 readings scanned": "26,940",
-                    "NO₂ readings scanned": "11,145",
-                    "Aggregation": "Per-site median per hour-of-day (typical-day profile)",
-                    "Intensity scale": "Per-station 10th–90th percentile stretch (reveals each monitor's own daily cycle even when the absolute μg/m³ values are low)",
-                    "Absolute values shown": "Stats panel reports the raw μg/m³ and ppb — unmodified.",
+                    "Total NYC monitors":         aq.get("stations", "–"),
+                    "  ↳ EPA federal":            aq.get("epa_stations", "–"),
+                    "  ↳ PurpleAir community":    aq.get("purpleair_stations", "–"),
+                    "PM2.5 readings scanned":     "26,940 (EPA) + 8,500+ (PurpleAir)",
+                    "NO₂ readings scanned":       "11,145 (EPA only)",
+                    "PurpleAir averaging":        "60-minute, last 7 days, atmospheric (outdoor-calibrated) PM2.5",
+                    "Aggregation":                "Per-site median per hour-of-day (typical-day profile)",
+                    "Intensity scale":            "Per-station 10th–90th percentile stretch (reveals each monitor's own daily cycle even when the absolute μg/m³ values are low)",
+                    "Absolute values shown":      "Stats panel reports the raw μg/m³ and ppb — unmodified.",
                 },
-                "notes": "EPA's regulated federal network is intentionally sparse — only a handful of stations cover all 5 boroughs at hourly resolution. PurpleAir community sensors would expand this by 20–50× once an API key is integrated.",
+                "notes": "EPA's regulated network has 5 NYC monitors at hourly resolution. PurpleAir's community-sensor network adds 50+ more outdoor sites for PM2.5, all rendered as halos on the map. Combined coverage is 10× the federal-only baseline.",
             },
             {
                 "key": "basemap",

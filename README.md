@@ -22,7 +22,7 @@ Three synchronized data layers, all real public data, on a dark map of Manhattan
 
 - **Taxi Trails** — 2,400 January 2025 yellow-taxi trips sampled from the NYC TLC dataset (3.47M total rides that month, ~2.93M after Manhattan filtering, stratified by hour of day). Trip geometry is snapped to actual OpenStreetMap roads via OSRM.
 - **Emission Heatmap** — 104 NYC DOT Automated Traffic Volume Count stations across Manhattan, hourly mean vehicle volumes converted to CO₂ intensity using EPA fleet-mix emission factors.
-- **Air Quality Halos** — 4 EPA AQS federal PM2.5 monitoring sites in the NYC bbox (parameter code 88101, 26,940 hourly readings from 2025), shown as halos that change color and radius with each station's typical-day hourly profile.
+- **Air Quality Halos** — **56 NYC monitors**: 5 EPA AQS federal regulatory stations (PM2.5 parameter 88101 + NO₂ parameter 42602, 38,085 hourly readings from 2025) plus 51 PurpleAir community sensors (atmospheric PM2.5, 60-min averages over the last 7 days). Shown as halos that change color and radius with each station's typical-day hourly profile.
 
 All three driven by one 24-hour master clock. Watch the city breathe.
 

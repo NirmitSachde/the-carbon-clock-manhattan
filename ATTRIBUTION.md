@@ -9,7 +9,8 @@ The MIT [LICENSE](LICENSE) covers the code in this repository. The data shown by
 | Yellow taxi trips | [NYC Taxi & Limousine Commission · Yellow Taxi Trip Records, January 2025](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) | Public, redistributable |
 | Traffic counts → CO₂ heatmap | [NYC DOT · Automated Traffic Volume Counts](https://data.cityofnewyork.us/Transportation/Automated-Traffic-Volume-Counts/7ym2-wayt) | NYC Open Data |
 | EPA emission factors | [US EPA — Greenhouse Gas Emissions from a Typical Passenger Vehicle](https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle) | US Government public domain |
-| Air quality (PM2.5 + NO₂) | [EPA Air Quality System (AQS) — hourly criteria pollutants, 2025](https://aqs.epa.gov/aqsweb/airdata/download_files.html) | US Government public domain |
+| Air quality (PM2.5 + NO₂) — federal regulatory | [EPA Air Quality System (AQS) — hourly criteria pollutants, 2025](https://aqs.epa.gov/aqsweb/airdata/download_files.html) | US Government public domain |
+| Air quality (PM2.5) — community sensors | [PurpleAir REST API](https://api.purpleair.com/) — 60-min averages over last 7 days | Public sensor data; API key required for ingest. Personal/non-commercial use OK. |
 | Taxi-zone shapefile | TLC Taxi Zone Lookup + Shapefile | Public, redistributable |
 | Road network (for OSRM snapping) | [OpenStreetMap — New York State extract](https://download.geofabrik.de/north-america/us/new-york.html) | © OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright) |
 

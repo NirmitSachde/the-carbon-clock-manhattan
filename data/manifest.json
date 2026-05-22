@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-22 18:25 UTC",
+  "generated_at": "2026-05-26 18:07 UTC",
   "layers": [
     {
       "key": "trips",
@@ -10,7 +10,7 @@
         "Total in source month": "3,475,226 rides",
         "Manhattan PU + DO": "2,933,898 rides",
         "Sampling": "Stratified random sample, balanced across 24 hours",
-        "Available tiers": "25k (25,008 trips), 100k (100,008 trips), 500k (484,155 trips), 2m (2,933,898 trips)",
+        "Available tiers": "25k (25,008 trips), 100k (100,008 trips), 500k (484,155 trips)",
         "Trip geometry": "Snapped to OpenStreetMap roads via OSRM v5",
         "Path simplification": "Douglas\u2013Peucker, 30 m tolerance",
         "Coordinates": "Zone centroids from TLC taxi-zone shapefile (EPSG:2263 \u2192 WGS84)",
@@ -36,18 +36,21 @@
     {
       "key": "airquality",
       "title": "Air-quality monitors",
-      "source": "EPA Air Quality System (AQS) \u00b7 Hourly criteria pollutants, 2025",
+      "source": "EPA AQS (federal, regulatory) + PurpleAir (community, low-cost) \u00b7 2025",
       "source_url": "https://aqs.epa.gov/aqsweb/airdata/download_files.html",
       "facts": {
         "Pollutants": "NO2, PM2.5",
-        "Federal monitors (NYC bbox)": 5,
-        "PM2.5 readings scanned": "26,940",
-        "NO\u2082 readings scanned": "11,145",
+        "Total NYC monitors": 56,
+        "  \u21b3 EPA federal": 5,
+        "  \u21b3 PurpleAir community": 51,
+        "PM2.5 readings scanned": "26,940 (EPA) + 8,500+ (PurpleAir)",
+        "NO\u2082 readings scanned": "11,145 (EPA only)",
+        "PurpleAir averaging": "60-minute, last 7 days, atmospheric (outdoor-calibrated) PM2.5",
         "Aggregation": "Per-site median per hour-of-day (typical-day profile)",
         "Intensity scale": "Per-station 10th\u201390th percentile stretch (reveals each monitor's own daily cycle even when the absolute \u03bcg/m\u00b3 values are low)",
         "Absolute values shown": "Stats panel reports the raw \u03bcg/m\u00b3 and ppb \u2014 unmodified."
       },
-      "notes": "EPA's regulated federal network is intentionally sparse \u2014 only a handful of stations cover all 5 boroughs at hourly resolution. PurpleAir community sensors would expand this by 20\u201350\u00d7 once an API key is integrated."
+      "notes": "EPA's regulated network has 5 NYC monitors at hourly resolution. PurpleAir's community-sensor network adds 50+ more outdoor sites for PM2.5, all rendered as halos on the map. Combined coverage is 10\u00d7 the federal-only baseline."
     },
     {
       "key": "basemap",
