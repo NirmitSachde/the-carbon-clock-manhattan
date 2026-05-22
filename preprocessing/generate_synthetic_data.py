@@ -40,19 +40,25 @@ M_PER_DEG_LNG = 111000.0 * math.cos(math.radians(ORIGIN_LAT))
 
 
 def latlng_to_grid(lng, lat):
-    """Rotate latlng into Manhattan-grid coordinates (x along avenues, y along streets)."""
+    """Rotate latlng into Manhattan-grid coordinates (gx perpendicular to avenues,
+    gy along avenue direction).
+
+    Manhattan's avenues run ~29° east of true north. To align them with the gy
+    axis, we rotate world coordinates clockwise by 29° (i.e. by -29° in
+    standard mathematical convention).
+    """
     dx = (lng - ORIGIN_LNG) * M_PER_DEG_LNG
     dy = (lat - ORIGIN_LAT) * M_PER_DEG_LAT
-    # Rotate by -29° so the grid is axis-aligned
-    gx =  dx * COS_ROT + dy * SIN_ROT
-    gy = -dx * SIN_ROT + dy * COS_ROT
+    # Clockwise rotation by 29°:  [[cosθ, sinθ], [-sinθ, cosθ]]^T
+    gx = dx * COS_ROT - dy * SIN_ROT
+    gy = dx * SIN_ROT + dy * COS_ROT
     return gx, gy
 
 
 def grid_to_latlng(gx, gy):
-    """Inverse of latlng_to_grid."""
-    dx = gx * COS_ROT - gy * SIN_ROT
-    dy = gx * SIN_ROT + gy * COS_ROT
+    """Inverse of latlng_to_grid — rotate back by -29° (i.e. CCW by 29°)."""
+    dx = gx * COS_ROT + gy * SIN_ROT
+    dy = -gx * SIN_ROT + gy * COS_ROT
     return (ORIGIN_LNG + dx / M_PER_DEG_LNG,
             ORIGIN_LAT + dy / M_PER_DEG_LAT)
 

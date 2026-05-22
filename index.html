@@ -704,7 +704,7 @@ const HEATMAP_RADIUS_PX = 45;
 
 // Cache-buster appended to data fetches. Bump this whenever data/*.json change
 // so deployed visitors don't get served a stale JSON from their browser cache.
-const DATA_VERSION = "v3";
+const DATA_VERSION = "v4";
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];
@@ -991,7 +991,9 @@ function initStandaloneDeck() {
         initialViewState: {
             longitude: MANHATTAN_CENTER[0],
             latitude: MANHATTAN_CENTER[1],
-            zoom: 12.2, pitch: 0, bearing: -17.6,
+            // bearing 29 = look toward 29° east of north, which aligns
+            // Manhattan's avenues with screen vertical
+            zoom: 12.2, pitch: 0, bearing: 29,
         },
         controller: true,
         layers: [],
@@ -1013,7 +1015,9 @@ async function initMap() {
             center: MANHATTAN_CENTER,
             zoom: 12.2,
             pitch: 0,
-            bearing: -17.6,
+            // bearing 29 = look toward 29° east of north, which aligns
+            // Manhattan's avenues with screen vertical (the classic Manhattan portrait view).
+            bearing: 29,
             antialias: false,
             preserveDrawingBuffer: false,
             fadeDuration: 0,
