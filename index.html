@@ -18,8 +18,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/deck.gl@9.0.16/dist.min.js"></script>
 
 <style>
@@ -58,8 +58,9 @@ html, body {
     background: var(--bg-dark);
 }
 
-/* Hide default Mapbox attribution control to keep the canvas clean.
-   Per Mapbox ToS we still render the attribution in our footer. */
+/* Mute MapLibre's default attribution control. We render our own attribution
+   in the footer to keep the canvas uncluttered. */
+.maplibregl-ctrl-attrib, .maplibregl-ctrl-logo,
 .mapboxgl-ctrl-attrib, .mapboxgl-ctrl-logo {
     opacity: 0.35;
     filter: grayscale(1) brightness(0.6);
@@ -337,45 +338,6 @@ html, body {
 }
 #attribution a:hover { color: var(--color-white); }
 
-#token-warning {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 100;
-    background: rgba(20, 20, 32, 0.95);
-    border: 1px solid var(--color-coral);
-    border-radius: 8px;
-    padding: 28px 32px;
-    max-width: 480px;
-    text-align: center;
-    box-shadow: 0 0 60px rgba(231, 76, 60, 0.2);
-    display: none;
-}
-#token-warning.show { display: block; }
-#token-warning h3 {
-    font-family: var(--font-heading);
-    color: var(--color-coral);
-    margin: 0 0 12px;
-    font-size: 16px;
-    letter-spacing: 0.5px;
-}
-#token-warning p {
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--color-white);
-    opacity: 0.8;
-    margin: 8px 0;
-}
-#token-warning code {
-    font-family: var(--font-mono);
-    background: rgba(0, 0, 0, 0.4);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 11px;
-    color: var(--color-teal);
-}
-
 @media (max-width: 720px) {
     #title .subtitle { display: none; }
     #time-display { font-size: 36px; top: 16px; }
@@ -646,7 +608,7 @@ html, body {
 
 <div id="attribution">
     Data: NYC TLC · NYC DOT · OpenAQ · EPA<br>
-    Map: <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener">© Mapbox</a> ·
+    Basemap: <a href="https://carto.com/about-carto/" target="_blank" rel="noopener">© CARTO</a> ·
     <a href="https://www.openstreetmap.org/about/" target="_blank" rel="noopener">© OpenStreetMap</a>
 </div>
 
@@ -683,15 +645,14 @@ html, body {
     </div>
 </div>
 
-<div id="token-warning">
-    <h3>Mapbox token missing</h3>
-    <p>Sign up free at <code>account.mapbox.com</code>, copy your default public token, and replace <code>YOUR_MAPBOX_TOKEN_HERE</code> in <code>index.html</code>.</p>
-    <p style="opacity: 0.5; font-size: 11px;">The data layers will still render without a basemap, but the city will be invisible underneath.</p>
-</div>
 
 <script>
 // ====== CONFIG ======
-const MAPBOX_TOKEN = "pk.eyJ1IjoibmlybWl0c2FjaGRlIiwiYSI6ImNtcGczZHIyMTBrcmIyc3Bsc3RzNzF3YjQifQ.tXOt7w86BK9BhGvXZiiMhw";
+// Basemap: Carto's "Dark Matter" GL style — no API key required, free for
+// non-commercial use, low rate-limit risk. Renders via MapLibre GL JS.
+// If Carto is unreachable, we fall back to a black canvas with deck.gl
+// layers only (still visually coherent thanks to the dark theme).
+const BASEMAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const MANHATTAN_CENTER = [-73.9712, 40.7831];
 const SECONDS_IN_DAY = 86400;
 
@@ -704,7 +665,7 @@ const HEATMAP_RADIUS_PX = 45;
 
 // Cache-buster appended to data fetches. Bump this whenever data/*.json change
 // so deployed visitors don't get served a stale JSON from their browser cache.
-const DATA_VERSION = "v5";
+const DATA_VERSION = "v6";
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];
@@ -964,14 +925,14 @@ function getAirQualityLayer(nowMs) {
 let map;
 let deckOverlay;
 
-function tokenLooksValid(t) {
-    return typeof t === "string" && t.startsWith("pk.") && t.length > 20;
-}
-
-function showError(msg) {
+function showError(userMessage, internalDetail) {
+    // Never expose URLs, tokens, or query parameters to the user. The
+    // banner only displays a friendly message; full details go to the
+    // console for the site owner to inspect via DevTools.
     const el = document.getElementById("error-banner");
-    document.getElementById("error-text").textContent = msg;
+    document.getElementById("error-text").textContent = userMessage;
     el.classList.add("show");
+    if (internalDetail) console.warn("[carbon-clock]", internalDetail);
 }
 
 function initStandaloneDeck() {
@@ -1001,110 +962,94 @@ function initStandaloneDeck() {
 }
 
 async function initMap() {
-    if (!tokenLooksValid(MAPBOX_TOKEN)) {
-        document.getElementById("token-warning").classList.add("show");
-        initStandaloneDeck();
-        return;
-    }
-
-    mapboxgl.accessToken = MAPBOX_TOKEN;
     try {
-        map = new mapboxgl.Map({
+        map = new maplibregl.Map({
             container: "map-container",
-            style: "mapbox://styles/mapbox/dark-v11",
+            style: BASEMAP_STYLE_URL,
             center: MANHATTAN_CENTER,
             zoom: 12.2,
             pitch: 0,
             // bearing 29 = look toward 29° east of north, which aligns
-            // Manhattan's avenues with screen vertical (the classic Manhattan portrait view).
+            // Manhattan's avenues with screen vertical (the classic
+            // Manhattan portrait view).
             bearing: 29,
             antialias: false,
-            preserveDrawingBuffer: false,
             fadeDuration: 0,
             maxPitch: 60,
             interactive: false,
             trackResize: true,
+            attributionControl: { compact: true },
         });
     } catch (e) {
-        console.error("Mapbox construction failed:", e);
-        showError("Basemap construction failed (" + (e.message || e) + "). Running without basemap.");
+        showError("Basemap unavailable — showing data layers on a dark canvas.",
+                  "MapLibre construction failed: " + (e && e.message || e));
         initStandaloneDeck();
         return;
     }
 
-    // Capture Mapbox errors so we know if the token/style/tiles fail.
-    // We only treat 'style load' errors as fatal — individual tile 401/403
-    // errors will surface here too, but the basemap can still partially render.
+    // Capture basemap errors without leaking URLs/tokens/SKUs to the user.
     let fatalError = null;
     map.on("error", (e) => {
         const err = (e && e.error) || e;
-        const msg = (err && err.message) || String(err);
         const status = err && err.status;
-        console.warn("Mapbox error:", msg, status);
-        // 401/403 on the style itself is fatal (token rejected).
-        if (status === 401 || status === 403 || /access token|unauthorized/i.test(msg)) {
-            if (!fatalError) fatalError = msg + (status ? " (HTTP " + status + ")" : "");
+        // We never put the underlying URL or status code in the user-facing
+        // banner — only the console for the site owner to inspect.
+        console.warn("[basemap]", status, err && err.message);
+        if (status === 401 || status === 403 || status === 404) {
+            if (!fatalError) fatalError = "auth-or-not-found";
         }
     });
 
-    // Wait for 'load' (style + sprite + glyphs parsed). Tiles continue to
-    // arrive after this; that's fine — they'll paint as they come in.
-    const loaded = await new Promise((resolve) => {
+    // Wait for 'load' (style + sprite + glyphs parsed). Tile fetches continue
+    // afterward — they'll paint as they arrive.
+    await new Promise((resolve) => {
         let settled = false;
-        const finish = (val) => { if (!settled) { settled = true; resolve(val); } };
-        map.once("load", () => finish("load"));
-        map.once("error", () => {
-            // First error usually arrives before 'load' if the style/token is bad
-            setTimeout(() => finish("error"), 200);
-        });
-        setTimeout(() => finish("timeout"), 8000);
+        const finish = () => { if (!settled) { settled = true; resolve(); } };
+        map.once("load", finish);
+        map.once("error", () => setTimeout(finish, 200));
+        setTimeout(finish, 8000);
     });
 
     if (fatalError) {
-        showError("Basemap unauthorized: " + fatalError + " — check the Mapbox token's URL restrictions.");
+        showError("Couldn't reach the basemap service — showing data layers on a dark canvas.",
+                  "Basemap fatal: " + fatalError);
         try { map.remove(); } catch (_) {}
         map = null;
         initStandaloneDeck();
         return;
     }
 
-    // Hard sanity check: did the style actually parse?
     let styleOk = false;
     try {
         const s = map.getStyle();
         styleOk = !!(s && s.layers && s.layers.length > 0);
     } catch (_) {}
     if (!styleOk) {
-        showError("Basemap style did not load (" + loaded + "). Rendering data layers only.");
+        showError("Basemap didn't finish loading — showing data layers on a dark canvas.",
+                  "Style did not load");
         try { map.remove(); } catch (_) {}
         map = null;
         initStandaloneDeck();
         return;
     }
 
-    // Apply dark style overrides (hide labels, mute roads, darken water/buildings).
+    // Carto's dark-matter style is already close to what we want. We mute
+    // labels (we don't need place names cluttering the viz) and darken
+    // water if the style exposes it.
     try {
         const style = map.getStyle();
         for (const layer of style.layers) {
-            if (layer.type === "symbol" || layer.type === "fill-extrusion") {
+            if (layer.type === "symbol") {
                 try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
             }
-            if (layer.id && layer.id.toLowerCase().includes("road")) {
-                try {
-                    map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
-                    map.setPaintProperty(layer.id, "line-opacity", 0.35);
-                } catch (_) {}
-            }
         }
-        try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
-        try {
-            map.setPaintProperty("building", "fill-color", "#141420");
-            map.setPaintProperty("building", "fill-opacity", 0.5);
-        } catch (_) {}
     } catch (e) {
-        console.warn("Style override partial failure:", e);
+        console.warn("[basemap] style polish partial failure:", e);
     }
 
+    // MapboxOverlay works with MapLibre too (the deck.gl docs explicitly
+    // support both). We pass interleaved:false so deck.gl draws on its
+    // own canvas on top of the basemap.
     deckOverlay = new deck.MapboxOverlay({
         interleaved: false,
         layers: [],
