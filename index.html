@@ -5,6 +5,8 @@
 <title>The Carbon Clock — Manhattan</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="A multi-layer animated visualization of traffic, emissions and air quality in Manhattan over a 24-hour cycle.">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta name="theme-color" content="#08080F">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -377,11 +379,95 @@ html, body {
     .pill { font-size: 10px; padding: 4px 8px; }
     #status-line, #attribution { display: none; }
 }
+
+/* ====== LOADER ====== */
+#loader {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--bg-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+    pointer-events: auto;
+}
+#loader.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+#loader-title {
+    font-family: var(--font-heading);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--color-white);
+    margin-bottom: 6px;
+    opacity: 0.9;
+}
+#loader-tagline {
+    font-family: var(--font-body);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    margin-bottom: 36px;
+}
+#loader-progress {
+    width: 260px;
+    height: 2px;
+    background: rgba(240, 240, 245, 0.08);
+    border-radius: 1px;
+    overflow: hidden;
+    margin-bottom: 18px;
+}
+#loader-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, var(--color-teal), var(--color-amber), var(--color-coral));
+    transition: width 0.35s ease;
+    box-shadow: 0 0 10px rgba(14, 210, 247, 0.6);
+}
+#loader-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    min-height: 14px;
+}
+#perf-badge {
+    position: fixed;
+    bottom: 90px;
+    right: 14px;
+    z-index: 10;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--color-muted);
+    background: rgba(8, 8, 15, 0.55);
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    letter-spacing: 0.5px;
+}
+#perf-badge.show { opacity: 0.7; }
 </style>
 </head>
 <body>
 
+<div id="loader">
+    <div id="loader-title">The Carbon Clock</div>
+    <div id="loader-tagline">Manhattan · 24 hours</div>
+    <div id="loader-progress"><div id="loader-bar"></div></div>
+    <div id="loader-status">Initializing…</div>
+</div>
+
 <div id="map-container"></div>
+<div id="perf-badge"></div>
 
 <div id="title">
     <span>The Carbon Clock</span><span class="sep">·</span><span>Manhattan</span>
@@ -455,7 +541,13 @@ html, body {
 const MAPBOX_TOKEN = "pk.eyJ1IjoibmlybWl0c2FjaGRlIiwiYSI6ImNtcGczZHIyMTBrcmIyc3Bsc3RzNzF3YjQifQ.tXOt7w86BK9BhGvXZiiMhw";
 const MANHATTAN_CENTER = [-73.9712, 40.7831];
 const SECONDS_IN_DAY = 86400;
-const FPS_TARGET = 60;
+
+// Performance tuning. All of these are conservative defaults that the
+// browser can autoselect-down from based on the user's GPU.
+const TARGET_FPS = 30;                // 33ms per frame instead of 16 — halves work
+const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+const TRAIL_LENGTH_SEC = 240;         // shorter trail => fewer pixels per trip
+const HEATMAP_RADIUS_PX = 45;
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];
@@ -472,6 +564,9 @@ const state = {
     emissions: {},
     airquality: [],
     layerVisibility: { trips: true, emissions: true, airquality: true },
+    lastRenderedHour: -1,    // for hour-keyed heatmap data swap
+    lastFpsStamp: 0,
+    fpsFrames: 0,
 };
 
 // ====== COLOR HELPERS ======
@@ -495,23 +590,107 @@ function intensityToColor(t) {
     ];
 }
 
+// ====== LOADER UI ======
+const loader = {
+    el: null,
+    bar: null,
+    status: null,
+    init() {
+        this.el = document.getElementById("loader");
+        this.bar = document.getElementById("loader-bar");
+        this.status = document.getElementById("loader-status");
+    },
+    progress(pct, msg) {
+        if (this.bar) this.bar.style.width = pct + "%";
+        if (msg && this.status) this.status.textContent = msg;
+    },
+    hide() {
+        if (this.el) {
+            this.el.classList.add("hidden");
+            setTimeout(() => this.el && this.el.remove(), 600);
+        }
+    },
+};
+
 // ====== DATA LOADING ======
-async function loadData() {
-    try {
-        const [trips, emissions, aq] = await Promise.all([
-            fetch("data/trips.json").then(r => r.json()),
-            fetch("data/emissions.json").then(r => r.json()),
-            fetch("data/airquality.json").then(r => r.json()),
-        ]);
-        state.trips = trips;
-        state.emissions = emissions;
-        state.airquality = aq;
-        console.log(`Loaded ${trips.length} trips, ${Object.keys(emissions).length} hourly emission snapshots, ${aq.length} air quality stations`);
-    } catch (e) {
-        console.error("Data load failed:", e);
-        alert("Could not load data/*.json. Run `python preprocessing/generate_synthetic_data.py` first.");
+// Streams a JSON file with progress callbacks based on Content-Length.
+async function fetchJSONWithProgress(url, onProgress) {
+    const resp = await fetch(url, { cache: "force-cache" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
+    const total = parseInt(resp.headers.get("content-length") || "0", 10);
+    if (!total || !resp.body || !resp.body.getReader) {
+        // Fallback: no streaming, parse whole thing
+        return resp.json();
     }
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (onProgress) onProgress(received, total);
+    }
+    const all = new Uint8Array(received);
+    let pos = 0;
+    for (const c of chunks) { all.set(c, pos); pos += c.length; }
+    return JSON.parse(new TextDecoder().decode(all));
 }
+
+// Pre-compute per-trip path/timestamps/color so the Deck.gl accessors are
+// pure pointer lookups (no map/closure allocation per row per frame).
+function preprocessTrips(trips) {
+    for (let i = 0; i < trips.length; i++) {
+        const t = trips[i];
+        const p = t.path;
+        const path = new Array(p.length);
+        const times = new Array(p.length);
+        for (let j = 0; j < p.length; j++) {
+            const pt = p[j];
+            path[j] = [pt[0], pt[1]];
+            times[j] = pt[2];
+        }
+        t._path = path;
+        t._timestamps = times;
+        const c = intensityToColor(t.color_intensity);
+        t._color = [c[0], c[1], c[2], 220];
+    }
+    return trips;
+}
+
+// Pre-compute per-hour emission arrays in the format Deck.gl expects: each
+// row already has a `position` tuple, so getPosition is a pointer lookup.
+function preprocessEmissions(emissions) {
+    const out = {};
+    for (const k of Object.keys(emissions)) {
+        const src = emissions[k];
+        const dst = new Array(src.length);
+        for (let i = 0; i < src.length; i++) {
+            const p = src[i];
+            dst[i] = { position: [p.lng, p.lat], weight: p.intensity };
+        }
+        out[k] = dst;
+    }
+    return out;
+}
+
+// ====== DECK.GL ACCESSORS (stable references — critical for perf) ======
+const TRIPS_ACCESSORS = {
+    getPath: d => d._path,
+    getTimestamps: d => d._timestamps,
+    getColor: d => d._color,
+};
+const EMISSIONS_ACCESSORS = {
+    getPosition: d => d.position,
+    getWeight: d => d.weight,
+};
+const AQ_ACCESSORS = {
+    getPosition: d => d._pos,
+    getRadius: d => d._radius,
+    getFillColor: d => d._fill,
+    getLineColor: d => d._stroke,
+};
 
 // ====== DECK.GL LAYERS ======
 function getTripsLayer() {
@@ -519,13 +698,11 @@ function getTripsLayer() {
     return new deck.TripsLayer({
         id: "trips",
         data: state.trips,
-        getPath: d => d.path.map(p => [p[0], p[1]]),
-        getTimestamps: d => d.path.map(p => p[2]),
-        getColor: d => intensityToColor(d.color_intensity),
+        ...TRIPS_ACCESSORS,
         opacity: 0.85,
         widthMinPixels: 2,
-        rounded: false,           // square caps are noticeably cheaper to rasterize
-        trailLength: 240,         // shorter trails => fewer pixels drawn per frame
+        rounded: false,
+        trailLength: TRAIL_LENGTH_SEC,
         currentTime: state.currentTime,
         shadowEnabled: false,
         capRounded: false,
@@ -533,102 +710,82 @@ function getTripsLayer() {
     });
 }
 
-// Layer caches: heatmap and AQ are expensive to rebuild every frame.
-// We rebuild them on a throttle (heatmap = ~3fps, AQ = ~10fps) and let
-// TripsLayer carry the per-frame smoothness via its currentTime uniform.
-const HEATMAP_REBUILD_MS = 350;   // ~3fps; heatmap is a slow-changing field
-const AQ_REBUILD_MS = 110;        // ~9fps; pulse remains visually smooth
-
+// Heatmap: hold a single layer instance, swap its `data` reference only when
+// the simulated hour ticks over (once every ~2.5s of real time at 1×). Per
+// frame, this layer is passed through Deck.gl's prop-diff and produces zero
+// work because nothing changed.
+const HEATMAP_COLOR_RANGE = [
+    [242, 169, 59,   0],
+    [242, 169, 59,  60],
+    [242, 169, 59, 140],
+    [248, 196, 100, 190],
+    [255, 220, 150, 220],
+    [255, 243, 224, 240],
+];
 let _heatmapLayer = null;
-let _heatmapBuiltAt = -Infinity;
-let _heatmapBuiltForVisible = false;
+let _heatmapHour = -1;
 
-let _aqLayer = null;
-let _aqBuiltAt = -Infinity;
-let _aqBuiltForVisible = false;
-
-function getEmissionsLayer(nowMs) {
-    if (!state.layerVisibility.emissions) {
-        _heatmapBuiltForVisible = false;
-        return null;
-    }
-    if (_heatmapLayer && _heatmapBuiltForVisible && (nowMs - _heatmapBuiltAt) < HEATMAP_REBUILD_MS) {
-        return _heatmapLayer;
-    }
-
+function getEmissionsLayer() {
+    if (!state.layerVisibility.emissions) return null;
     const hour = Math.floor(state.currentTime / 3600) % 24;
-    const nextHour = (hour + 1) % 24;
-    const fraction = (state.currentTime / 3600) - hour;
-    const cur = state.emissions[String(hour)] || [];
-    const nxt = state.emissions[String(nextHour)] || [];
-
-    const interpolated = new Array(cur.length);
-    for (let i = 0; i < cur.length; i++) {
-        const p = cur[i], np = nxt[i] || p;
-        interpolated[i] = {
-            position: [p.lng, p.lat],
-            weight: p.intensity + (np.intensity - p.intensity) * fraction,
-        };
+    if (!_heatmapLayer || hour !== _heatmapHour) {
+        _heatmapLayer = new deck.HeatmapLayer({
+            id: "emissions",
+            data: state.emissions[String(hour)] || [],
+            ...EMISSIONS_ACCESSORS,
+            radiusPixels: HEATMAP_RADIUS_PX,
+            intensity: 1.2,
+            threshold: 0.05,
+            aggregation: "SUM",
+            colorRange: HEATMAP_COLOR_RANGE,
+            opacity: 0.55,
+        });
+        _heatmapHour = hour;
     }
-
-    _heatmapLayer = new deck.HeatmapLayer({
-        id: "emissions",
-        data: interpolated,
-        getPosition: d => d.position,
-        getWeight: d => d.weight,
-        radiusPixels: 45,
-        intensity: 1.2,
-        threshold: 0.05,
-        aggregation: "SUM",
-        colorRange: [
-            [242, 169, 59,   0],
-            [242, 169, 59,  60],
-            [242, 169, 59, 140],
-            [248, 196, 100, 190],
-            [255, 220, 150, 220],
-            [255, 243, 224, 240],
-        ],
-        opacity: 0.55,
-    });
-    _heatmapBuiltAt = nowMs;
-    _heatmapBuiltForVisible = true;
     return _heatmapLayer;
 }
 
-function getAirQualityLayer(nowMs) {
-    if (!state.layerVisibility.airquality || state.airquality.length === 0) {
-        _aqBuiltForVisible = false;
-        return null;
-    }
-    if (_aqLayer && _aqBuiltForVisible && (nowMs - _aqBuiltAt) < AQ_REBUILD_MS) {
-        return _aqLayer;
-    }
+// AQ: 8 stations. Recompute their per-frame radius/color only on a low cadence
+// (~10fps). Pre-compute the position tuple once.
+const AQ_REBUILD_MS = 100;
+let _aqLayer = null;
+let _aqBuiltAt = -Infinity;
+let _aqStationsCache = null;
 
+function ensureAqStationsCache() {
+    if (_aqStationsCache) return;
+    _aqStationsCache = state.airquality.map(d => ({
+        _pos: [d.lng, d.lat],
+        _radius: 0,
+        _fill: [14, 210, 247, 90],
+        _stroke: [14, 210, 247, 200],
+        hourly_intensity: d.hourly_intensity,
+    }));
+}
+
+function getAirQualityLayer(nowMs) {
+    if (!state.layerVisibility.airquality || state.airquality.length === 0) return null;
+    if (_aqLayer && (nowMs - _aqBuiltAt) < AQ_REBUILD_MS) return _aqLayer;
+
+    ensureAqStationsCache();
     const hour = Math.floor(state.currentTime / 3600) % 24;
     const nextHour = (hour + 1) % 24;
     const fraction = (state.currentTime / 3600) - hour;
     const pulse = Math.sin(state.currentTime / 90) * 0.12 + 1;
 
-    // Pre-compute per-station values so the accessor closures don't
-    // re-interpolate per call. Tiny dataset (8 stations) — cheap.
-    const stations = state.airquality.map(d => {
-        const v = lerp(d.hourly_intensity[hour], d.hourly_intensity[nextHour], fraction);
-        const color = intensityToColor(v);
-        return {
-            position: [d.lng, d.lat],
-            radius: (180 + v * 520) * pulse,
-            fill: [color[0], color[1], color[2], 90],
-            stroke: [color[0], color[1], color[2], 200],
-        };
-    });
+    for (let i = 0; i < _aqStationsCache.length; i++) {
+        const s = _aqStationsCache[i];
+        const v = lerp(s.hourly_intensity[hour], s.hourly_intensity[nextHour], fraction);
+        const c = intensityToColor(v);
+        s._radius = (180 + v * 520) * pulse;
+        s._fill[0] = c[0]; s._fill[1] = c[1]; s._fill[2] = c[2];
+        s._stroke[0] = c[0]; s._stroke[1] = c[1]; s._stroke[2] = c[2];
+    }
 
     _aqLayer = new deck.ScatterplotLayer({
         id: "airquality",
-        data: stations,
-        getPosition: d => d.position,
-        getRadius: d => d.radius,
-        getFillColor: d => d.fill,
-        getLineColor: d => d.stroke,
+        data: _aqStationsCache,
+        ...AQ_ACCESSORS,
         opacity: 1.0,
         radiusUnits: "meters",
         stroked: true,
@@ -636,9 +793,13 @@ function getAirQualityLayer(nowMs) {
         lineWidthMinPixels: 1.5,
         radiusMinPixels: 6,
         radiusMaxPixels: 80,
+        updateTriggers: {
+            getRadius: _aqBuiltAt,
+            getFillColor: _aqBuiltAt,
+            getLineColor: _aqBuiltAt,
+        },
     });
     _aqBuiltAt = nowMs;
-    _aqBuiltForVisible = true;
     return _aqLayer;
 }
 
@@ -650,10 +811,9 @@ function tokenLooksValid(t) {
     return typeof t === "string" && t.startsWith("pk.") && t.length > 20;
 }
 
-function initMap() {
+async function initMap() {
     if (!tokenLooksValid(MAPBOX_TOKEN)) {
         document.getElementById("token-warning").classList.add("show");
-        // Render Deck.gl alone on a black background (no basemap, no Mapbox dependency)
         const container = document.getElementById("map-container");
         const canvas = document.createElement("canvas");
         canvas.id = "deck-canvas";
@@ -667,9 +827,7 @@ function initMap() {
             initialViewState: {
                 longitude: MANHATTAN_CENTER[0],
                 latitude: MANHATTAN_CENTER[1],
-                zoom: 12.2,
-                pitch: 0,
-                bearing: -17.6,
+                zoom: 12.2, pitch: 0, bearing: -17.6,
             },
             controller: true,
             layers: [],
@@ -683,59 +841,70 @@ function initMap() {
         style: "mapbox://styles/mapbox/dark-v11",
         center: MANHATTAN_CENTER,
         zoom: 12.2,
-        pitch: 0,                    // top-down: way cheaper than 45° (no 3D buildings)
+        pitch: 0,                       // top-down — no 3D building cost
         bearing: -17.6,
-        antialias: false,            // saves a multisample pass per frame
+        antialias: false,
         preserveDrawingBuffer: false,
-        maxPitch: 60,                // user can still tilt by dragging if they want
+        fadeDuration: 0,                // disable tile cross-fades (per-frame cost)
+        maxPitch: 60,
+        interactive: false,             // we lock the view; no pan/zoom needed
+        trackResize: true,
     });
 
-    map.on("load", () => {
-        // Hide all symbol (label) layers AND any 3D building extrusion layers — those
-        // are GPU-expensive and we want a flat dark canvas anyway.
-        const style = map.getStyle();
-        if (style && style.layers) {
-            style.layers.forEach(layer => {
-                if (layer.type === "symbol" || layer.type === "fill-extrusion") {
-                    try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
+    // Wait for the map's full style + tiles to load and become idle, so the
+    // basemap is fully painted before we hand control to deck.gl. Without
+    // this, deck would render before the basemap exists, which is when the
+    // user sees "no map in the bg".
+    await new Promise((resolve) => {
+        let loaded = false;
+        const onIdle = () => {
+            if (loaded) return;
+            loaded = true;
+            // Style adjustments after tiles render. Wrapped in try/catch
+            // because the style layer set varies by Mapbox version.
+            const style = map.getStyle();
+            if (style && style.layers) {
+                for (const layer of style.layers) {
+                    if (layer.type === "symbol" || layer.type === "fill-extrusion") {
+                        try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
+                    }
+                    if (layer.id && layer.id.toLowerCase().includes("road")) {
+                        try {
+                            map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
+                            map.setPaintProperty(layer.id, "line-opacity", 0.35);
+                        } catch (_) {}
+                    }
                 }
-                if (layer.id && layer.id.toLowerCase().includes("road")) {
-                    try {
-                        map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
-                        map.setPaintProperty(layer.id, "line-opacity", 0.35);
-                    } catch (_) {}
-                }
-            });
-            try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
-            try {
-                map.setPaintProperty("building", "fill-color", "#141420");
-                map.setPaintProperty("building", "fill-opacity", 0.5);
-            } catch (_) {}
-        }
+                try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
+                try {
+                    map.setPaintProperty("building", "fill-color", "#141420");
+                    map.setPaintProperty("building", "fill-opacity", 0.5);
+                } catch (_) {}
+            }
+            resolve();
+        };
+        map.once("idle", onIdle);
+        // Failsafe: don't hang the loader forever if Mapbox stalls
+        setTimeout(() => { if (!loaded) { loaded = true; resolve(); } }, 6000);
     });
 
     deckOverlay = new deck.MapboxOverlay({
         interleaved: false,
         layers: [],
-        // Critical on retina: render at logical pixel ratio, not 2×/3×. Cuts GPU
-        // pixel-shading load by 4–9× with almost no visible difference for
-        // these soft layers.
         useDevicePixelRatio: 1,
     });
     map.addControl(deckOverlay);
 }
 
 function updateLayers(nowMs) {
+    if (!deckOverlay || !deckOverlay.setProps) return;
     nowMs = nowMs || performance.now();
     const layers = [
-        getEmissionsLayer(nowMs),
+        getEmissionsLayer(),
         getAirQualityLayer(nowMs),
-        getTripsLayer(),    // trips on top, rebuilt each frame for smooth currentTime uniform
+        getTripsLayer(),    // on top
     ].filter(Boolean);
-
-    if (deckOverlay && deckOverlay.setProps) {
-        deckOverlay.setProps({ layers });
-    }
+    deckOverlay.setProps({ layers });
 }
 
 // ====== TIME DISPLAY ======
@@ -755,20 +924,39 @@ function updateTimeDisplay() {
 }
 
 // ====== ANIMATION LOOP ======
+// We rate-limit to TARGET_FPS regardless of the monitor's refresh rate. On a
+// 60Hz display that's roughly half the work of an unthrottled rAF; on a 120Hz
+// display it's a quarter.
 let lastFrame = performance.now();
+let lastTick = performance.now();
+const perfBadge = { el: null, frames: 0, last: 0 };
+
 function animate(now) {
-    const dt = (now - lastFrame) / 1000;  // seconds since last frame
+    requestAnimationFrame(animate);
+    const sinceTick = now - lastTick;
+    if (sinceTick < FRAME_INTERVAL_MS) return;
+    lastTick = now - (sinceTick % FRAME_INTERVAL_MS);
+
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);  // cap dt at 100ms to avoid jumps after tab return
     lastFrame = now;
 
     if (state.playing) {
-        // 1× speed = 1 minute of simulated time per 1 second of real time
-        // -> 24h cycle in 24 minutes at 1×. (At 10× = 2.4 min.)
+        // 1× speed = 1 simulated minute per real second -> 24h cycle in 24 real minutes
         state.currentTime = (state.currentTime + state.speed * 60 * dt) % SECONDS_IN_DAY;
+        if (state.currentTime < 0) state.currentTime += SECONDS_IN_DAY;
     }
 
     updateLayers(now);
     updateTimeDisplay();
-    requestAnimationFrame(animate);
+
+    // FPS counter (updates badge once per second)
+    perfBadge.frames++;
+    if (now - perfBadge.last > 1000) {
+        const fps = Math.round(perfBadge.frames * 1000 / (now - perfBadge.last));
+        if (perfBadge.el) perfBadge.el.textContent = fps + " fps";
+        perfBadge.frames = 0;
+        perfBadge.last = now;
+    }
 }
 
 // ====== CONTROLS ======
@@ -828,14 +1016,73 @@ function setupControls() {
 
 // ====== INIT ======
 async function main() {
-    initMap();
-    await loadData();
+    loader.init();
+    perfBadge.el = document.getElementById("perf-badge");
+
+    // 1. Fetch data with progress
+    loader.progress(5, "Fetching trips…");
+    let trips, emissions, aq;
+    try {
+        trips = await fetchJSONWithProgress("data/trips.json", (got, total) => {
+            const pct = 5 + (got / total) * 30;  // 5 -> 35%
+            loader.progress(pct);
+        });
+        loader.progress(38, "Fetching emissions…");
+        emissions = await fetchJSONWithProgress("data/emissions.json", (got, total) => {
+            const pct = 38 + (got / total) * 12;
+            loader.progress(pct);
+        });
+        loader.progress(52, "Fetching air quality…");
+        aq = await fetchJSONWithProgress("data/airquality.json", (got, total) => {
+            const pct = 52 + (got / total) * 6;
+            loader.progress(pct);
+        });
+    } catch (e) {
+        loader.progress(0, "Data load failed — see console");
+        console.error("Data load failed:", e);
+        return;
+    }
+
+    // 2. Pre-compute attribute arrays so Deck.gl accessors are pointer lookups
+    loader.progress(62, "Preparing trip paths…");
+    await new Promise(r => setTimeout(r, 16));  // let the UI paint the bar
+    state.trips = preprocessTrips(trips);
+
+    loader.progress(70, "Building emission grid…");
+    await new Promise(r => setTimeout(r, 16));
+    state.emissions = preprocessEmissions(emissions);
+
+    state.airquality = aq;
+
+    // 3. Load and warm up the basemap (waits for map.idle)
+    loader.progress(76, "Loading Manhattan basemap…");
+    try {
+        await initMap();
+    } catch (e) {
+        console.warn("Map init failed:", e);
+    }
+
+    // 4. Hand off to animation
+    loader.progress(94, "Starting clock…");
     setupControls();
     setPlaying(state.playing);
+    perfBadge.last = performance.now();
     lastFrame = performance.now();
+    lastTick = performance.now();
     requestAnimationFrame(animate);
+
+    loader.progress(100, "Ready");
+    setTimeout(() => {
+        loader.hide();
+        // Show the fps badge briefly so the user can verify perf
+        if (perfBadge.el) {
+            perfBadge.el.classList.add("show");
+            setTimeout(() => perfBadge.el.classList.remove("show"), 6000);
+        }
+    }, 250);
 }
 
+// Kick off when DOM is ready (script is at end of body, so it already is)
 main();
 </script>
 </body>
