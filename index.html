@@ -455,6 +455,116 @@ html, body {
     letter-spacing: 0.5px;
 }
 #perf-badge.show { opacity: 0.7; }
+
+#error-banner {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: rgba(231, 76, 60, 0.15);
+    border: 1px solid rgba(231, 76, 60, 0.5);
+    color: var(--color-coral);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 8px 14px;
+    border-radius: 4px;
+    max-width: 460px;
+    text-align: center;
+    line-height: 1.5;
+    display: none;
+    backdrop-filter: blur(8px);
+}
+#error-banner.show { display: block; }
+#error-banner .dismiss {
+    margin-left: 12px;
+    cursor: pointer;
+    opacity: 0.6;
+    padding-left: 8px;
+    border-left: 1px solid rgba(231, 76, 60, 0.4);
+}
+#error-banner .dismiss:hover { opacity: 1; }
+
+/* Narrative caption — story text that fades in below the clock */
+#caption {
+    position: fixed;
+    top: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 8;
+    font-family: var(--font-body);
+    font-style: italic;
+    font-weight: 300;
+    font-size: 13px;
+    letter-spacing: 0.8px;
+    color: rgba(240, 240, 245, 0.55);
+    pointer-events: none;
+    text-align: center;
+    max-width: 520px;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+    text-shadow: 0 0 22px rgba(0, 0, 0, 0.95);
+}
+#caption.show { opacity: 1; }
+
+/* Live stats HUD — small panel on the left side */
+#stats {
+    position: fixed;
+    top: 100px;
+    left: 32px;
+    z-index: 9;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-muted);
+    pointer-events: none;
+    line-height: 1.9;
+    letter-spacing: 0.3px;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+}
+#stats.show { opacity: 1; }
+#stats .stat-row { display: flex; gap: 10px; align-items: baseline; }
+#stats .stat-label {
+    color: var(--color-muted);
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 1.2px;
+    min-width: 100px;
+}
+#stats .stat-value {
+    color: var(--color-white);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    min-width: 60px;
+    text-align: right;
+}
+#stats .stat-unit {
+    color: var(--color-muted);
+    font-size: 9px;
+}
+#stats .bar {
+    display: inline-block;
+    width: 50px;
+    height: 3px;
+    background: rgba(240, 240, 245, 0.08);
+    border-radius: 1px;
+    overflow: hidden;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+#stats .bar-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(to right, var(--color-teal), var(--color-amber), var(--color-coral));
+    transform-origin: left;
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+}
+
+@media (max-width: 720px) {
+    #caption { font-size: 11px; max-width: 280px; top: 78px; }
+    #stats { display: none; }
+}
 </style>
 </head>
 <body>
@@ -476,6 +586,31 @@ html, body {
 
 <div id="time-display">
     <span id="time-text">00:00</span><span class="ampm" id="time-ampm">AM</span>
+</div>
+
+<div id="caption"></div>
+
+<div id="error-banner">
+    <span id="error-text"></span>
+    <span class="dismiss" onclick="this.parentElement.classList.remove('show')">×</span>
+</div>
+
+<div id="stats">
+    <div class="stat-row">
+        <span class="stat-label">Active trips</span>
+        <span class="stat-value" id="stat-trips">0</span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">Emissions</span>
+        <span class="stat-value" id="stat-emissions">0</span>
+        <span class="stat-unit">% of peak</span>
+        <span class="bar"><span class="bar-fill" id="stat-emissions-bar"></span></span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">PM2.5 avg</span>
+        <span class="stat-value" id="stat-pm25">0</span>
+        <span class="stat-unit">μg/m³</span>
+    </div>
 </div>
 
 <div id="legend">
@@ -548,6 +683,10 @@ const TARGET_FPS = 30;                // 33ms per frame instead of 16 — halves
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 const TRAIL_LENGTH_SEC = 240;         // shorter trail => fewer pixels per trip
 const HEATMAP_RADIUS_PX = 45;
+
+// Cache-buster appended to data fetches. Bump this whenever data/*.json change
+// so deployed visitors don't get served a stale JSON from their browser cache.
+const DATA_VERSION = "v3";
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];
@@ -811,82 +950,138 @@ function tokenLooksValid(t) {
     return typeof t === "string" && t.startsWith("pk.") && t.length > 20;
 }
 
+function showError(msg) {
+    const el = document.getElementById("error-banner");
+    document.getElementById("error-text").textContent = msg;
+    el.classList.add("show");
+}
+
+function initStandaloneDeck() {
+    // Fallback: render Deck.gl layers on a black canvas with no basemap.
+    const container = document.getElementById("map-container");
+    // Clean out any partially-initialized Mapbox children
+    container.innerHTML = "";
+    const canvas = document.createElement("canvas");
+    canvas.id = "deck-canvas";
+    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;";
+    container.appendChild(canvas);
+    deckOverlay = new deck.Deck({
+        canvas: canvas,
+        width: "100%",
+        height: "100%",
+        useDevicePixelRatio: 1,
+        initialViewState: {
+            longitude: MANHATTAN_CENTER[0],
+            latitude: MANHATTAN_CENTER[1],
+            zoom: 12.2, pitch: 0, bearing: -17.6,
+        },
+        controller: true,
+        layers: [],
+    });
+}
+
 async function initMap() {
     if (!tokenLooksValid(MAPBOX_TOKEN)) {
         document.getElementById("token-warning").classList.add("show");
-        const container = document.getElementById("map-container");
-        const canvas = document.createElement("canvas");
-        canvas.id = "deck-canvas";
-        canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;";
-        container.appendChild(canvas);
-        deckOverlay = new deck.Deck({
-            canvas: canvas,
-            width: "100%",
-            height: "100%",
-            useDevicePixelRatio: 1,
-            initialViewState: {
-                longitude: MANHATTAN_CENTER[0],
-                latitude: MANHATTAN_CENTER[1],
-                zoom: 12.2, pitch: 0, bearing: -17.6,
-            },
-            controller: true,
-            layers: [],
-        });
+        initStandaloneDeck();
         return;
     }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
-    map = new mapboxgl.Map({
-        container: "map-container",
-        style: "mapbox://styles/mapbox/dark-v11",
-        center: MANHATTAN_CENTER,
-        zoom: 12.2,
-        pitch: 0,                       // top-down — no 3D building cost
-        bearing: -17.6,
-        antialias: false,
-        preserveDrawingBuffer: false,
-        fadeDuration: 0,                // disable tile cross-fades (per-frame cost)
-        maxPitch: 60,
-        interactive: false,             // we lock the view; no pan/zoom needed
-        trackResize: true,
+    try {
+        map = new mapboxgl.Map({
+            container: "map-container",
+            style: "mapbox://styles/mapbox/dark-v11",
+            center: MANHATTAN_CENTER,
+            zoom: 12.2,
+            pitch: 0,
+            bearing: -17.6,
+            antialias: false,
+            preserveDrawingBuffer: false,
+            fadeDuration: 0,
+            maxPitch: 60,
+            interactive: false,
+            trackResize: true,
+        });
+    } catch (e) {
+        console.error("Mapbox construction failed:", e);
+        showError("Basemap construction failed (" + (e.message || e) + "). Running without basemap.");
+        initStandaloneDeck();
+        return;
+    }
+
+    // Capture Mapbox errors so we know if the token/style/tiles fail.
+    // We only treat 'style load' errors as fatal — individual tile 401/403
+    // errors will surface here too, but the basemap can still partially render.
+    let fatalError = null;
+    map.on("error", (e) => {
+        const err = (e && e.error) || e;
+        const msg = (err && err.message) || String(err);
+        const status = err && err.status;
+        console.warn("Mapbox error:", msg, status);
+        // 401/403 on the style itself is fatal (token rejected).
+        if (status === 401 || status === 403 || /access token|unauthorized/i.test(msg)) {
+            if (!fatalError) fatalError = msg + (status ? " (HTTP " + status + ")" : "");
+        }
     });
 
-    // Wait for the map's full style + tiles to load and become idle, so the
-    // basemap is fully painted before we hand control to deck.gl. Without
-    // this, deck would render before the basemap exists, which is when the
-    // user sees "no map in the bg".
-    await new Promise((resolve) => {
-        let loaded = false;
-        const onIdle = () => {
-            if (loaded) return;
-            loaded = true;
-            // Style adjustments after tiles render. Wrapped in try/catch
-            // because the style layer set varies by Mapbox version.
-            const style = map.getStyle();
-            if (style && style.layers) {
-                for (const layer of style.layers) {
-                    if (layer.type === "symbol" || layer.type === "fill-extrusion") {
-                        try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
-                    }
-                    if (layer.id && layer.id.toLowerCase().includes("road")) {
-                        try {
-                            map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
-                            map.setPaintProperty(layer.id, "line-opacity", 0.35);
-                        } catch (_) {}
-                    }
-                }
-                try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
+    // Wait for 'load' (style + sprite + glyphs parsed). Tiles continue to
+    // arrive after this; that's fine — they'll paint as they come in.
+    const loaded = await new Promise((resolve) => {
+        let settled = false;
+        const finish = (val) => { if (!settled) { settled = true; resolve(val); } };
+        map.once("load", () => finish("load"));
+        map.once("error", () => {
+            // First error usually arrives before 'load' if the style/token is bad
+            setTimeout(() => finish("error"), 200);
+        });
+        setTimeout(() => finish("timeout"), 8000);
+    });
+
+    if (fatalError) {
+        showError("Basemap unauthorized: " + fatalError + " — check the Mapbox token's URL restrictions.");
+        try { map.remove(); } catch (_) {}
+        map = null;
+        initStandaloneDeck();
+        return;
+    }
+
+    // Hard sanity check: did the style actually parse?
+    let styleOk = false;
+    try {
+        const s = map.getStyle();
+        styleOk = !!(s && s.layers && s.layers.length > 0);
+    } catch (_) {}
+    if (!styleOk) {
+        showError("Basemap style did not load (" + loaded + "). Rendering data layers only.");
+        try { map.remove(); } catch (_) {}
+        map = null;
+        initStandaloneDeck();
+        return;
+    }
+
+    // Apply dark style overrides (hide labels, mute roads, darken water/buildings).
+    try {
+        const style = map.getStyle();
+        for (const layer of style.layers) {
+            if (layer.type === "symbol" || layer.type === "fill-extrusion") {
+                try { map.setLayoutProperty(layer.id, "visibility", "none"); } catch (_) {}
+            }
+            if (layer.id && layer.id.toLowerCase().includes("road")) {
                 try {
-                    map.setPaintProperty("building", "fill-color", "#141420");
-                    map.setPaintProperty("building", "fill-opacity", 0.5);
+                    map.setPaintProperty(layer.id, "line-color", "#1A1A2E");
+                    map.setPaintProperty(layer.id, "line-opacity", 0.35);
                 } catch (_) {}
             }
-            resolve();
-        };
-        map.once("idle", onIdle);
-        // Failsafe: don't hang the loader forever if Mapbox stalls
-        setTimeout(() => { if (!loaded) { loaded = true; resolve(); } }, 6000);
-    });
+        }
+        try { map.setPaintProperty("water", "fill-color", "#0C0C1A"); } catch (_) {}
+        try {
+            map.setPaintProperty("building", "fill-color", "#141420");
+            map.setPaintProperty("building", "fill-opacity", 0.5);
+        } catch (_) {}
+    } catch (e) {
+        console.warn("Style override partial failure:", e);
+    }
 
     deckOverlay = new deck.MapboxOverlay({
         interleaved: false,
@@ -923,6 +1118,104 @@ function updateTimeDisplay() {
     }
 }
 
+// ====== NARRATIVE CAPTIONS ======
+// Each entry: [start_hour, caption]. The caption shown is the one whose
+// start_hour is the largest <= current hour. They fade in/out as time crosses
+// thresholds.
+const STORY = [
+    [ 0, "Midnight. Manhattan exhales."],
+    [ 3, "The deepest quiet. Only night-shift workers and late taxis."],
+    [ 5, "First trickle. Trips begin radiating in from the bridges and tunnels."],
+    [ 7, "Morning rush. Avenues converge on Midtown. Emissions bloom."],
+    [ 9, "Peak commute. The city inhales its workforce."],
+    [11, "Steady mid-morning flow. Air quality begins to degrade."],
+    [12, "Lunch traffic. Cross-streets fill with short hops."],
+    [15, "Afternoon lull. The grid breathes more evenly."],
+    [17, "Evening surge. Trips radiate outward toward the outer boroughs."],
+    [19, "Peak emissions. Air quality at its worst."],
+    [21, "The pace slows. Restaurants, theaters, then home."],
+    [23, "Manhattan winds down. The clock resets."],
+];
+
+let _captionEl = null;
+let _captionCurrentHour = -1;
+function updateCaption() {
+    if (!_captionEl) _captionEl = document.getElementById("caption");
+    const hour = Math.floor(state.currentTime / 3600) % 24;
+    if (hour === _captionCurrentHour) return;
+    _captionCurrentHour = hour;
+
+    // Find the latest story entry whose threshold is <= current hour
+    let chosen = STORY[STORY.length - 1][1];
+    for (let i = 0; i < STORY.length; i++) {
+        if (STORY[i][0] <= hour) chosen = STORY[i][1];
+        else break;
+    }
+    _captionEl.classList.remove("show");
+    setTimeout(() => {
+        _captionEl.textContent = chosen;
+        _captionEl.classList.add("show");
+    }, 200);
+}
+
+// ====== LIVE STATS ======
+// Re-computed at ~5fps; cheap enough.
+const STATS_REBUILD_MS = 250;
+let _statsBuiltAt = -Infinity;
+let _statsEl = { wrap: null, trips: null, em: null, emBar: null, pm: null };
+
+function updateStats(nowMs) {
+    if (nowMs - _statsBuiltAt < STATS_REBUILD_MS) return;
+    _statsBuiltAt = nowMs;
+
+    if (!_statsEl.wrap) {
+        _statsEl.wrap = document.getElementById("stats");
+        _statsEl.trips = document.getElementById("stat-trips");
+        _statsEl.em = document.getElementById("stat-emissions");
+        _statsEl.emBar = document.getElementById("stat-emissions-bar");
+        _statsEl.pm = document.getElementById("stat-pm25");
+        _statsEl.wrap.classList.add("show");
+    }
+
+    // Active trips: count trips whose timestamps overlap (currentTime - trail, currentTime].
+    // Pre-computed per-trip start/end would be even faster; the linear scan is fine
+    // at 5fps for 2-3K trips.
+    const now = state.currentTime;
+    const trail = TRAIL_LENGTH_SEC;
+    let active = 0;
+    const trips = state.trips;
+    for (let i = 0; i < trips.length; i++) {
+        const path = trips[i].path;
+        const start = path[0][2];
+        const end = path[path.length - 1][2];
+        if (end >= now - trail && start <= now) active++;
+    }
+
+    // Current emission intensity (mean across all grid cells for this hour)
+    const hour = Math.floor(now / 3600) % 24;
+    const emArr = state.emissions[String(hour)] || [];
+    let emSum = 0;
+    for (let i = 0; i < emArr.length; i++) emSum += emArr[i].weight;
+    const emPctOfPeak = emArr.length ? Math.round((emSum / emArr.length) * 100) : 0;
+
+    // Average PM2.5 across stations at this hour (interpolated to next hour)
+    const nextHour = (hour + 1) % 24;
+    const frac = (now / 3600) - hour;
+    let pmSum = 0;
+    const aq = state.airquality;
+    for (let i = 0; i < aq.length; i++) {
+        const a = aq[i].hourly_pm25[hour];
+        const b = aq[i].hourly_pm25[nextHour];
+        pmSum += a + (b - a) * frac;
+    }
+    const pmAvg = aq.length ? (pmSum / aq.length) : 0;
+
+    _statsEl.trips.textContent = active.toLocaleString();
+    _statsEl.em.textContent = emPctOfPeak;
+    _statsEl.emBar.style.transform = "scaleX(" + Math.min(1, emPctOfPeak / 100) + ")";
+    _statsEl.pm.textContent = pmAvg.toFixed(1);
+}
+
 // ====== ANIMATION LOOP ======
 // We rate-limit to TARGET_FPS regardless of the monitor's refresh rate. On a
 // 60Hz display that's roughly half the work of an unthrottled rAF; on a 120Hz
@@ -948,6 +1241,8 @@ function animate(now) {
 
     updateLayers(now);
     updateTimeDisplay();
+    updateCaption();
+    updateStats(now);
 
     // FPS counter (updates badge once per second)
     perfBadge.frames++;
@@ -1023,17 +1318,17 @@ async function main() {
     loader.progress(5, "Fetching trips…");
     let trips, emissions, aq;
     try {
-        trips = await fetchJSONWithProgress("data/trips.json", (got, total) => {
+        trips = await fetchJSONWithProgress("data/trips.json?" + DATA_VERSION, (got, total) => {
             const pct = 5 + (got / total) * 30;  // 5 -> 35%
             loader.progress(pct);
         });
         loader.progress(38, "Fetching emissions…");
-        emissions = await fetchJSONWithProgress("data/emissions.json", (got, total) => {
+        emissions = await fetchJSONWithProgress("data/emissions.json?" + DATA_VERSION, (got, total) => {
             const pct = 38 + (got / total) * 12;
             loader.progress(pct);
         });
         loader.progress(52, "Fetching air quality…");
-        aq = await fetchJSONWithProgress("data/airquality.json", (got, total) => {
+        aq = await fetchJSONWithProgress("data/airquality.json?" + DATA_VERSION, (got, total) => {
             const pct = 52 + (got / total) * 6;
             loader.progress(pct);
         });
