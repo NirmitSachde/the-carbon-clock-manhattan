@@ -10,11 +10,11 @@ Inspired by the MIT Senseable City Lab's Manhattan emissions study published in 
 
 ## What You Are Seeing
 
-Three synchronized data layers on a dark map of Manhattan:
+Three synchronized data layers, all real public data, on a dark map of Manhattan:
 
-- **Taxi Trails** — ~8,000 sampled taxi trips animated as glowing particles flowing through the street grid
-- **Emission Heatmap** — estimated CO₂ intensity computed from traffic volume data and EPA emission factors, blooming with rush hours
-- **Air Quality Halos** — PM2.5 readings from EPA monitoring stations, color and radius changing as pollution rises and falls
+- **Taxi Trails** — 2,400 January 2025 yellow-taxi trips sampled from the NYC TLC dataset (3.47M total rides that month, ~2.93M after Manhattan filtering, stratified by hour of day). Trip geometry is snapped to actual OpenStreetMap roads via OSRM.
+- **Emission Heatmap** — 104 NYC DOT Automated Traffic Volume Count stations across Manhattan, hourly mean vehicle volumes converted to CO₂ intensity using EPA fleet-mix emission factors.
+- **Air Quality Halos** — 4 EPA AQS federal PM2.5 monitoring sites in the NYC bbox (parameter code 88101, 26,940 hourly readings from 2025), shown as halos that change color and radius with each station's typical-day hourly profile.
 
 All three driven by one 24-hour master clock. Watch the city breathe.
 
