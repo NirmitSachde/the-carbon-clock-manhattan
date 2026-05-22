@@ -676,7 +676,7 @@ const HEATMAP_RADIUS_PX = 45;
 
 // Cache-buster appended to data fetches. Bump this whenever data/*.json change
 // so deployed visitors don't get served a stale JSON from their browser cache.
-const DATA_VERSION = "v8-real-snapped";
+const DATA_VERSION = "v9-real-dynamic";
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];
@@ -839,10 +839,11 @@ function getTripsLayer() {
     });
 }
 
-// Heatmap: hold a single layer instance, swap its `data` reference only when
-// the simulated hour ticks over (once every ~2.5s of real time at 1×). Per
-// frame, this layer is passed through Deck.gl's prop-diff and produces zero
-// work because nothing changed.
+// Heatmap: linearly interpolate between adjacent hour snapshots and rebuild
+// at ~3 fps (every 300 ms of real time). At 1× speed that's roughly one
+// rebuild per 5 simulated minutes, so the heatmap morphs continuously
+// through the day rather than snapping on the hour. We mutate a single
+// pre-allocated buffer (no per-frame allocation).
 const HEATMAP_COLOR_RANGE = [
     [242, 169, 59,   0],
     [242, 169, 59,  60],
@@ -851,26 +852,50 @@ const HEATMAP_COLOR_RANGE = [
     [255, 220, 150, 220],
     [255, 243, 224, 240],
 ];
+const HEATMAP_REBUILD_MS = 300;
 let _heatmapLayer = null;
-let _heatmapHour = -1;
+let _heatmapBuiltAt = -Infinity;
+let _heatmapBuf = null;          // pre-allocated interpolated buffer
 
-function getEmissionsLayer() {
+function getEmissionsLayer(nowMs) {
     if (!state.layerVisibility.emissions) return null;
-    const hour = Math.floor(state.currentTime / 3600) % 24;
-    if (!_heatmapLayer || hour !== _heatmapHour) {
-        _heatmapLayer = new deck.HeatmapLayer({
-            id: "emissions",
-            data: state.emissions[String(hour)] || [],
-            ...EMISSIONS_ACCESSORS,
-            radiusPixels: HEATMAP_RADIUS_PX,
-            intensity: 1.2,
-            threshold: 0.02,    // lower => low-volume night hours still visible
-            aggregation: "SUM",
-            colorRange: HEATMAP_COLOR_RANGE,
-            opacity: 0.55,
-        });
-        _heatmapHour = hour;
+    if (_heatmapLayer && (nowMs - _heatmapBuiltAt) < HEATMAP_REBUILD_MS) {
+        return _heatmapLayer;
     }
+
+    const hour = Math.floor(state.currentTime / 3600) % 24;
+    const nextHour = (hour + 1) % 24;
+    const frac = (state.currentTime / 3600) - hour;
+    const cur = state.emissions[String(hour)] || [];
+    const nxt = state.emissions[String(nextHour)] || cur;
+
+    // Pre-allocate or resize the interpolation buffer once.
+    if (!_heatmapBuf || _heatmapBuf.length !== cur.length) {
+        _heatmapBuf = new Array(cur.length);
+        for (let i = 0; i < cur.length; i++) {
+            _heatmapBuf[i] = { position: cur[i].position, weight: 0 };
+        }
+    }
+    // In-place lerp between cur[i].weight and nxt[i].weight (or nxt[i] missing).
+    for (let i = 0; i < cur.length; i++) {
+        const a = cur[i].weight;
+        const b = i < nxt.length ? nxt[i].weight : a;
+        _heatmapBuf[i].weight = a + (b - a) * frac;
+        _heatmapBuf[i].position = cur[i].position;
+    }
+
+    _heatmapLayer = new deck.HeatmapLayer({
+        id: "emissions",
+        data: _heatmapBuf,
+        ...EMISSIONS_ACCESSORS,
+        radiusPixels: HEATMAP_RADIUS_PX,
+        intensity: 1.2,
+        threshold: 0.02,
+        aggregation: "SUM",
+        colorRange: HEATMAP_COLOR_RANGE,
+        opacity: 0.55,
+    });
+    _heatmapBuiltAt = nowMs;
     return _heatmapLayer;
 }
 
@@ -1073,7 +1098,7 @@ function updateLayers(nowMs) {
     if (!deckOverlay || !deckOverlay.setProps) return;
     nowMs = nowMs || performance.now();
     const layers = [
-        getEmissionsLayer(),
+        getEmissionsLayer(nowMs),
         getAirQualityLayer(nowMs),
         getTripsLayer(),    // on top
     ].filter(Boolean);

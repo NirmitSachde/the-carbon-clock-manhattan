@@ -146,12 +146,29 @@ def main():
                     v = no2_row[h]
                     if pd.notna(v): no2_hourly[h] = round(float(v), 1)
 
-        # Combined intensity per hour: max of normalized PM2.5 and normalized NO2
-        intensity = []
-        for h in range(24):
-            i_pm = normalize(pm_hourly[h], PM25_CLEAN, PM25_UNHEALTHY) if pm_hourly[h] is not None else 0.0
-            i_no2 = normalize(no2_hourly[h], NO2_CLEAN, NO2_UNHEALTHY) if no2_hourly[h] is not None else 0.0
-            intensity.append(round(max(i_pm, i_no2), 3))
+        # Per-station percentile-normalized intensity. Real NYC PM2.5 stays in
+        # a narrow band (5-8 μg/m³) so the WHO absolute scale leaves halos
+        # almost flat all day. We instead stretch each station's own 10th-90th
+        # percentile across 0..1 so the halo's daily cycle reflects that
+        # station's actual variation. The raw μg/m³ and ppb numbers remain in
+        # hourly_pm25/hourly_no2 untouched — the stats panel still shows the
+        # absolute reality.
+        def stretch(arr):
+            real = [v for v in arr if v is not None and v > 0]
+            if len(real) < 2:
+                return [0.0] * 24
+            srt = sorted(real)
+            lo = srt[max(0, int(len(srt) * 0.10))]
+            hi = srt[min(len(srt) - 1, int(len(srt) * 0.90))]
+            span = max(0.001, hi - lo)
+            return [
+                max(0.0, min(1.0, (v - lo) / span)) if v is not None else 0.0
+                for v in arr
+            ]
+
+        pm_stretch = stretch(pm_hourly) if any(v is not None for v in pm_hourly) else [0.0] * 24
+        no2_stretch = stretch(no2_hourly) if any(v is not None for v in no2_hourly) else [0.0] * 24
+        intensity = [round(max(pm_stretch[h], no2_stretch[h]), 3) for h in range(24)]
 
         # Fill in any missing hourly values via forward/backfill (keep file shape consistent)
         def ffill_list(arr):
