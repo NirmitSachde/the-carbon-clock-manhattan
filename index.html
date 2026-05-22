@@ -2032,16 +2032,23 @@ async function main() {
     loader.init();
     perfBadge.el = document.getElementById("perf-badge");
 
-    // Pick a tier:
-    //   1. URL hash override wins, e.g. #tier=500k  (lets you bookmark / share)
-    //   2. Otherwise pick by viewport — phones default to 25K so the page
-    //      lands fast on mobile networks. Desktops get the richer 100K.
-    const hashTier = new URLSearchParams(location.hash.replace(/^#/, "")).get("tier");
+    // URL hash parsing. Supports two keys:
+    //   #tier=500k   — override the auto-picked tier
+    //   #time=08:00  — pin the clock at a specific HH:MM and pause (useful
+    //                  for bookmarking / shareable links / OG-image capture)
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const hashTier = hashParams.get("tier");
     if (hashTier && TIERS[hashTier]) {
         state.tier = hashTier;
     } else {
         const isPhone = window.matchMedia("(max-width: 720px)").matches;
         state.tier = isPhone ? "25k" : "100k";
+    }
+    const hashTime = hashParams.get("time");
+    if (hashTime && /^\d{1,2}:\d{2}$/.test(hashTime)) {
+        const [hh, mm] = hashTime.split(":").map(Number);
+        state.currentTime = (hh % 24) * 3600 + (mm % 60) * 60;
+        state.playing = false;          // freeze the clock at the pinned time
     }
     const tierSelect = document.getElementById("tier-select");
     if (tierSelect) tierSelect.value = state.tier;

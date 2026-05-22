@@ -1,8 +1,16 @@
 # The Carbon Clock — Manhattan
 
+[![Live demo](https://img.shields.io/badge/live-demo-0ED2F7?style=flat-square&logo=github&logoColor=white&labelColor=08080F)](https://nirmitsachde.github.io/the-carbon-clock-manhattan/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-F0F0F5?style=flat-square&labelColor=08080F)](LICENSE)
+[![Data](https://img.shields.io/badge/data-NYC%20TLC%20%C2%B7%20DOT%20%C2%B7%20EPA%20AQS-F2A93B?style=flat-square&labelColor=08080F)](#data)
+[![Built with deck.gl](https://img.shields.io/badge/built%20with-deck.gl-E74C3C?style=flat-square&labelColor=08080F)](https://deck.gl)
+[![MapLibre + CARTO](https://img.shields.io/badge/basemap-MapLibre%20%2B%20CARTO-0ED2F7?style=flat-square&labelColor=08080F)](https://carto.com/basemaps/)
+[![OSRM road snapping](https://img.shields.io/badge/road%20snapping-OSRM-F2A93B?style=flat-square&labelColor=08080F)](https://project-osrm.org/)
+[![Trips](https://img.shields.io/badge/real%20trips-2.9M%20Jan--2025-E74C3C?style=flat-square&labelColor=08080F)](#data)
+
 A multi-layer animated visualization of traffic, emissions and air quality in Manhattan over a 24-hour cycle.
 
-**[Live Demo](https://nirmitsachde.github.io/the-carbon-clock-manhattan/)** *(once deployed)*
+**[Live Demo](https://nirmitsachde.github.io/the-carbon-clock-manhattan/)**
 
 Inspired by the MIT Senseable City Lab's Manhattan emissions study published in Nature Sustainability (April 2026).
 
