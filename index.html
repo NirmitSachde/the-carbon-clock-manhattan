@@ -641,6 +641,88 @@ html, body {
     overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
+.modal-card--small {
+    max-width: 420px;
+    padding: 28px 32px 22px;
+}
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 22px;
+}
+.modal-btn {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 9px 18px;
+    border-radius: 5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    letter-spacing: 0.3px;
+    transition: all 0.15s ease;
+    min-height: 38px;
+}
+.modal-btn--ghost {
+    background: none;
+    border-color: var(--color-border);
+    color: var(--color-muted);
+}
+.modal-btn--ghost:hover {
+    color: var(--color-white);
+    border-color: rgba(240, 240, 245, 0.3);
+    background: rgba(255, 255, 255, 0.04);
+}
+.modal-btn--primary {
+    background: var(--color-teal);
+    color: #02141a;
+    border-color: var(--color-teal);
+    box-shadow: 0 0 16px rgba(14, 210, 247, 0.25);
+}
+.modal-btn--primary:hover {
+    background: #4be0ff;
+    border-color: #4be0ff;
+}
+
+/* Toast — small floating confirmation that fades in then out */
+#toast {
+    position: fixed;
+    top: 92px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+    z-index: 70;
+    background: rgba(8, 8, 15, 0.92);
+    border: 1px solid var(--color-teal);
+    color: var(--color-white);
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    font-weight: 400;
+    letter-spacing: 0.2px;
+    padding: 9px 18px;
+    border-radius: 24px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45),
+                0 0 18px rgba(14, 210, 247, 0.25);
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+    max-width: 90vw;
+    text-align: center;
+}
+#toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+#toast.toast--warning {
+    border-color: var(--color-amber);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45),
+                0 0 18px rgba(242, 169, 59, 0.25);
+}
+
+@media (max-width: 480px) {
+    .modal-card--small { padding: 22px 18px 16px; }
+    .modal-btn { font-size: 11.5px; padding: 8px 14px; }
+    #toast { top: 70px; font-size: 11.5px; padding: 7px 14px; }
+}
 .modal-card h2 {
     font-family: var(--font-heading);
     font-weight: 600;
@@ -962,6 +1044,20 @@ html, body {
     </button>
 </div>
 
+<div id="confirm-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card modal-card--small">
+        <h2 id="confirm-title">Confirm</h2>
+        <p id="confirm-text" class="modal-lede"></p>
+        <div class="modal-actions">
+            <button class="modal-btn modal-btn--ghost" id="confirm-cancel">Cancel</button>
+            <button class="modal-btn modal-btn--primary" id="confirm-ok">Continue</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"><span id="toast-text"></span></div>
+
 <div id="about-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
     <div class="modal-backdrop"></div>
     <div class="modal-card">
@@ -1092,6 +1188,62 @@ const loader = {
         }
     },
 };
+
+// Format a byte count as "1.2 MB" / "342 KB" for the loader status line.
+function formatBytes(b) {
+    if (!b || isNaN(b)) return "";
+    if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + " MB";
+    if (b >= 1024)        return (b / 1024).toFixed(0) + " KB";
+    return b + " B";
+}
+
+// ====== IN-APP CONFIRM (replaces window.confirm so the page stays in style) ======
+function customConfirm({ title, message, okLabel = "Continue", cancelLabel = "Cancel" }) {
+    return new Promise((resolve) => {
+        const modal  = document.getElementById("confirm-modal");
+        const okBtn  = document.getElementById("confirm-ok");
+        const cxBtn  = document.getElementById("confirm-cancel");
+        const back   = modal.querySelector(".modal-backdrop");
+        document.getElementById("confirm-title").textContent = title;
+        document.getElementById("confirm-text").textContent  = message;
+        okBtn.textContent = okLabel;
+        cxBtn.textContent = cancelLabel;
+
+        const cleanup = (val) => {
+            modal.classList.remove("show");
+            okBtn.removeEventListener("click", onOk);
+            cxBtn.removeEventListener("click", onCancel);
+            back.removeEventListener("click", onCancel);
+            document.removeEventListener("keydown", onKey);
+            resolve(val);
+        };
+        const onOk     = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+        const onKey    = (e) => {
+            if (e.key === "Escape") onCancel();
+            else if (e.key === "Enter") onOk();
+        };
+        okBtn.addEventListener("click", onOk);
+        cxBtn.addEventListener("click", onCancel);
+        back.addEventListener("click", onCancel);
+        document.addEventListener("keydown", onKey);
+
+        modal.classList.add("show");
+        setTimeout(() => okBtn.focus(), 50);
+    });
+}
+
+// ====== TOAST (non-blocking confirmation strip) ======
+let _toastTimer = null;
+function showToast(message, { duration = 3000, variant = "default" } = {}) {
+    const el = document.getElementById("toast");
+    document.getElementById("toast-text").textContent = message;
+    el.classList.remove("toast--warning");
+    if (variant === "warning") el.classList.add("toast--warning");
+    el.classList.add("show");
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.remove("show"), duration);
+}
 
 // ====== DATA LOADING ======
 // Streams a file with progress callbacks based on Content-Length.
@@ -1792,9 +1944,15 @@ async function loadTier(tier) {
         if (binResp.ok) {
             const buf = await fetchWithProgress(
                 tierInfo.trips + "?" + DATA_VERSION,
-                (got, total) => loader.progress(5 + (got / total) * 60, "Loading " + tierInfo.label + "…"),
+                (got, total) => {
+                    const pct = total ? (5 + (got / total) * 60) : 5;
+                    const txt = total
+                        ? `${formatBytes(got)} / ${formatBytes(total)}`
+                        : `${formatBytes(got)} downloaded`;
+                    loader.progress(pct, txt);
+                },
             );
-            loader.progress(68, "Decoding…");
+            loader.progress(68, "Decoding " + tierInfo.label + "…");
             await new Promise(r => setTimeout(r, 16));
             trips = decodeTripsBinary(buf);
         }
@@ -1942,13 +2100,20 @@ async function main() {
 // Tier change handler — re-fetch trips while the animation keeps running.
 async function switchTier(newTier) {
     if (!TIERS[newTier] || newTier === state.tier) return;
-
-    // Confirm before loading large tiers so casual visitors don't accidentally
-    // start a 270 MB download.
     const info = TIERS[newTier];
+
+    // Confirm before loading large tiers (so casual visitors don't start a
+    // 270 MB download by accident). Uses our in-app modal — no jarring
+    // native browser confirm.
     if (info.warn) {
-        const proceed = window.confirm(info.warn);
-        if (!proceed) {
+        const sizeStr = info.size_mb ? `~${info.size_mb} MB` : "Large download";
+        const ok = await customConfirm({
+            title: `Load ${info.label}?`,
+            message: info.warn,
+            okLabel: `Load (${sizeStr})`,
+            cancelLabel: "Cancel",
+        });
+        if (!ok) {
             document.getElementById("tier-select").value = state.tier;
             return;
         }
@@ -1957,19 +2122,23 @@ async function switchTier(newTier) {
     const wasPlaying = state.playing;
     state.playing = false;
     loader.init();
-    loader.el.classList.remove("hidden");
-    document.body.appendChild(loader.el);  // remount if it was removed
+    if (loader.el) {
+        loader.el.classList.remove("hidden");
+        if (!loader.el.parentNode) document.body.appendChild(loader.el);
+    }
     loader.progress(2, "Switching to " + info.label + "…");
     try {
         await loadTier(newTier);
         history.replaceState(null, "", "#tier=" + newTier);
+        document.getElementById("tier-select").value = newTier;   // keep UI in sync
+        showToast(`Loaded ${info.label} (${state.trips.length.toLocaleString()} real Jan-2025 trips)`);
     } catch (e) {
         showError("Couldn't load that tier — falling back to current.", String(e));
         document.getElementById("tier-select").value = state.tier;
     }
     state.playing = wasPlaying;
     loader.progress(100, "Ready");
-    setTimeout(() => loader.hide(), 200);
+    setTimeout(() => loader.hide(), 250);
 }
 
 // Wire tier select + about modal once DOM is ready (script runs at end of body)
