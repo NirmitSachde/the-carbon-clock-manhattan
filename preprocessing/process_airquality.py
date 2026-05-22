@@ -1,157 +1,200 @@
-"""Query the OpenAQ v3 API for NYC PM2.5 stations -> data/airquality.json.
+"""Process EPA AQS hourly air-quality data into airquality.json.
 
-Output schema (matches what index.html expects):
-  [
-    {
-      "id": <openaq_location_id>,
-      "name": "...",
-      "lat": ..., "lng": ...,
-      "hourly_pm25": [24 floats, ug/m3],
-      "hourly_intensity": [24 floats in 0..1]
-    },
-    ...
-  ]
+Combines two regulated criteria pollutants:
+  - PM2.5 (parameter code 88101) — fine particulate matter, μg/m³
+  - NO2  (parameter code 42602) — nitrogen dioxide, ppb (strong indicator
+    of vehicle/combustion sources, complements PM2.5 in urban air)
 
-Auth:
-  Set OPENAQ_API_KEY in the environment. Get a key at https://explore.openaq.org/.
+Each AQS monitoring site becomes one entry in airquality.json. Sites may
+publish either pollutant or both. Intensity is the max of the per-
+pollutant normalized intensities, so a station with high NO2 or high PM2.5
+both show as 'unhealthy'.
 
-Notes:
-  - This script computes a "typical day" by taking the median PM2.5 value per hour
-    across the lookback window (default 30 days).
-  - 0..1 intensity scales 5 ug/m3 (clean) -> 55 ug/m3 (EPA unhealthy).
+Source files (download manually before running):
+  https://aqs.epa.gov/aqsweb/airdata/hourly_88101_2025.zip
+  https://aqs.epa.gov/aqsweb/airdata/hourly_42602_2025.zip
 """
 
 import argparse
 import json
-import os
-import statistics
 import sys
-import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
+import pandas as pd
 
-BASE_URL = "https://api.openaq.org/v3"
-DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data" / "airquality.json"
-MANHATTAN_CENTER = (40.7831, -73.9712)
+ROOT = Path(__file__).resolve().parent.parent
 
+# NYC metropolitan bounding box — Manhattan plus near neighbors that
+# contribute to its air column.
+LAT_MIN, LAT_MAX = 40.65, 40.92
+LNG_MIN, LNG_MAX = -74.10, -73.85
 
-def headers():
-    key = os.getenv("OPENAQ_API_KEY")
-    if not key:
-        print("WARN: OPENAQ_API_KEY not set. OpenAQ v3 may rate-limit unauthenticated requests.",
-              file=sys.stderr)
-        return {}
-    return {"X-API-Key": key}
+# Normalization breakpoints. Below `clean` -> intensity 0. Above `unhealthy` -> 1.
+PM25_CLEAN, PM25_UNHEALTHY = 5.0, 55.0    # μg/m³ — WHO + US EPA AQI
+NO2_CLEAN, NO2_UNHEALTHY = 5.0, 50.0      # ppb — typical urban background to elevated
 
-
-def find_locations(radius_m: int = 15000, limit: int = 50):
-    resp = requests.get(
-        f"{BASE_URL}/locations",
-        params={
-            "coordinates": f"{MANHATTAN_CENTER[0]},{MANHATTAN_CENTER[1]}",
-            "radius": radius_m,
-            "parameters_id": 2,  # PM2.5
-            "limit": limit,
-        },
-        headers=headers(),
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json().get("results", [])
+KEEP_COLS = [
+    "State Code", "County Code", "Site Num",
+    "Latitude", "Longitude",
+    "Time Local",
+    "Sample Measurement",
+    "County Name",
+]
 
 
-def fetch_hourly_measurements(location_id: int, days: int = 30):
-    """Fetch measurements for the last `days` days and bucket by hour-of-day."""
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
+def normalize(v, lo, hi):
+    if pd.isna(v):
+        return 0.0
+    return float(max(0.0, min(1.0, (v - lo) / (hi - lo))))
 
-    bucket = {h: [] for h in range(24)}
-    page = 1
-    while True:
-        resp = requests.get(
-            f"{BASE_URL}/locations/{location_id}/measurements",
-            params={
-                "parameters_id": 2,
-                "date_from": start.isoformat(),
-                "date_to": end.isoformat(),
-                "limit": 1000,
-                "page": page,
-            },
-            headers=headers(),
-            timeout=60,
-        )
-        if resp.status_code == 429:
-            time.sleep(2)
+
+def aggregate(csv_path: Path, label: str, chunksize: int = 500_000) -> pd.DataFrame:
+    """Stream a (huge) AQS CSV, filter to NYC bbox, aggregate hourly per-site median."""
+    if not csv_path.exists():
+        print(f"  {label}: file missing ({csv_path}) — skipping this pollutant.")
+        return None
+
+    pieces = []
+    scanned = 0
+    for chunk in pd.read_csv(csv_path, chunksize=chunksize,
+                             usecols=lambda c: c in KEEP_COLS,
+                             low_memory=False,
+                             dtype={"State Code": str, "County Code": str, "Site Num": str}):
+        scanned += len(chunk)
+        chunk = chunk[chunk["State Code"] == "36"]
+        if chunk.empty:
             continue
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("results", [])
-        if not results:
-            break
-        for m in results:
-            ts = m.get("period", {}).get("datetime_from", {}).get("utc") or m.get("date", {}).get("utc")
-            value = m.get("value")
-            if ts is None or value is None:
-                continue
-            try:
-                hour = datetime.fromisoformat(ts.replace("Z", "+00:00")).hour
-                bucket[hour].append(float(value))
-            except (ValueError, TypeError):
-                continue
-        meta = data.get("meta", {})
-        if meta.get("found", 0) <= page * 1000:
-            break
-        page += 1
+        chunk = chunk[
+            (chunk["Latitude"] >= LAT_MIN) & (chunk["Latitude"] <= LAT_MAX) &
+            (chunk["Longitude"] >= LNG_MIN) & (chunk["Longitude"] <= LNG_MAX)
+        ]
+        if chunk.empty:
+            continue
+        pieces.append(chunk)
 
-    profile = []
-    for h in range(24):
-        vals = bucket[h]
-        profile.append(round(statistics.median(vals), 1) if vals else 0.0)
-    return profile
+    if not pieces:
+        print(f"  {label}: no NYC-area readings found.")
+        return None
+
+    df = pd.concat(pieces, ignore_index=True)
+    df = df.dropna(subset=["Sample Measurement"])
+    df["site_id"] = (df["State Code"].astype(str) + "-"
+                     + df["County Code"].astype(str) + "-"
+                     + df["Site Num"].astype(str))
+    df["hour"] = df["Time Local"].astype(str).str.slice(0, 2).astype(int) % 24
+    # Drop obviously bad measurements
+    df = df[df["Sample Measurement"] >= 0]
+
+    sites = df["site_id"].nunique()
+    print(f"  {label}: scanned {scanned:,} rows, kept {len(df):,} readings across {sites} NYC sites")
+
+    grp = df.groupby(["site_id", "hour"])["Sample Measurement"].median().reset_index()
+    pivot = grp.pivot(index="site_id", columns="hour", values="Sample Measurement")
+    pivot = pivot.ffill(axis=1).bfill(axis=1)
+
+    meta = df.groupby("site_id").agg(
+        Latitude=("Latitude", "first"),
+        Longitude=("Longitude", "first"),
+        County=("County Name", "first"),
+    ).reset_index().set_index("site_id")
+
+    pivot = pivot.join(meta, how="left")
+    return pivot
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=str(DEFAULT_OUT))
-    ap.add_argument("--days", type=int, default=30)
-    ap.add_argument("--radius", type=int, default=15000)
+    ap.add_argument("--pm25-csv", default=str(ROOT / "raw" / "hourly_88101_2025.csv"))
+    ap.add_argument("--no2-csv",  default=str(ROOT / "raw" / "hourly_42602_2025.csv"))
+    ap.add_argument("--out",      default=str(ROOT / "data" / "airquality.json"))
     args = ap.parse_args()
 
-    print(f"Finding PM2.5 stations within {args.radius}m of Manhattan...")
-    locations = find_locations(radius_m=args.radius)
-    print(f"  -> {len(locations)} locations")
+    print("Processing PM2.5 (88101)...")
+    pm = aggregate(Path(args.pm25_csv), "PM2.5")
+    print("Processing NO2 (42602)...")
+    no2 = aggregate(Path(args.no2_csv), "NO2")
 
-    stations = []
-    for loc in locations:
-        coords = loc.get("coordinates") or {}
-        lat, lng = coords.get("latitude"), coords.get("longitude")
-        if lat is None or lng is None:
-            continue
-        print(f"  fetching {loc['id']} ({loc.get('name')})...")
-        try:
-            profile = fetch_hourly_measurements(loc["id"], days=args.days)
-        except requests.HTTPError as e:
-            print(f"    skip ({e})")
-            continue
+    if pm is None and no2 is None:
+        sys.exit("No AQS data available for either pollutant. Download the AQS zips first.")
 
-        intensity = [round(min(max((v - 5) / 50, 0), 1), 3) for v in profile]
-        stations.append({
-            "id": loc["id"],
-            "name": loc.get("name", f"station-{loc['id']}"),
+    # Collect all unique site IDs across both pollutants
+    all_sites = set()
+    if pm is not None: all_sites.update(pm.index)
+    if no2 is not None: all_sites.update(no2.index)
+
+    out = []
+    for sid in sorted(all_sites):
+        pm_row = pm.loc[sid] if pm is not None and sid in pm.index else None
+        no2_row = no2.loc[sid] if no2 is not None and sid in no2.index else None
+
+        # Use whichever pollutant carries the site metadata
+        anchor = pm_row if pm_row is not None else no2_row
+        lat = float(anchor["Latitude"])
+        lng = float(anchor["Longitude"])
+        county = str(anchor.get("County") or "")
+
+        pm_hourly = [None] * 24
+        no2_hourly = [None] * 24
+        if pm_row is not None:
+            for h in range(24):
+                if h in pm_row.index:
+                    v = pm_row[h]
+                    if pd.notna(v): pm_hourly[h] = round(float(v), 1)
+        if no2_row is not None:
+            for h in range(24):
+                if h in no2_row.index:
+                    v = no2_row[h]
+                    if pd.notna(v): no2_hourly[h] = round(float(v), 1)
+
+        # Combined intensity per hour: max of normalized PM2.5 and normalized NO2
+        intensity = []
+        for h in range(24):
+            i_pm = normalize(pm_hourly[h], PM25_CLEAN, PM25_UNHEALTHY) if pm_hourly[h] is not None else 0.0
+            i_no2 = normalize(no2_hourly[h], NO2_CLEAN, NO2_UNHEALTHY) if no2_hourly[h] is not None else 0.0
+            intensity.append(round(max(i_pm, i_no2), 3))
+
+        # Fill in any missing hourly values via forward/backfill (keep file shape consistent)
+        def ffill_list(arr):
+            last = None
+            for i in range(24):
+                if arr[i] is not None: last = arr[i]
+                else: arr[i] = last
+            last = None
+            for i in range(23, -1, -1):
+                if arr[i] is not None: last = arr[i]
+                else: arr[i] = last
+            return [v if v is not None else 0.0 for v in arr]
+
+        pm_hourly = ffill_list(pm_hourly)
+        no2_hourly = ffill_list(no2_hourly)
+
+        pollutants = []
+        if pm_row is not None: pollutants.append("PM2.5")
+        if no2_row is not None: pollutants.append("NO2")
+
+        out.append({
+            "id": sid,
+            "name": f"{county} · {sid}".strip(" ·"),
             "lat": lat,
             "lng": lng,
-            "hourly_pm25": profile,
+            "pollutants": pollutants,
+            "hourly_pm25": pm_hourly,
+            "hourly_no2": no2_hourly,
             "hourly_intensity": intensity,
         })
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w") as f:
-        json.dump(stations, f, separators=(",", ":"))
+    out_path.write_text(json.dumps(out, separators=(",", ":")))
 
-    print(f"Wrote {len(stations)} stations -> {out_path}")
+    print(f"\nWrote {len(out)} monitoring sites -> {out_path}")
+    print(f"File size: {out_path.stat().st_size / 1024:.1f} KB")
+    for s in out:
+        pm_avg = sum(s["hourly_pm25"]) / 24 if any(s["hourly_pm25"]) else 0
+        no2_avg = sum(s["hourly_no2"]) / 24 if any(s["hourly_no2"]) else 0
+        print(f"  {s['id']}  ({s['lat']}, {s['lng']})  "
+              f"{','.join(s['pollutants']):<11}  "
+              f"PM2.5 avg={pm_avg:.1f}  NO2 avg={no2_avg:.1f}")
 
 
 if __name__ == "__main__":
