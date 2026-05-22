@@ -103,6 +103,23 @@ python3 preprocessing/process_airquality.py
 
 Each script writes its output to `data/` and is independent — you can re-run one without re-running the others.
 
+### Optional: snap trips to real OSM roads
+
+The synthetic generator builds trips that follow a model of Manhattan's
+avenue + cross-street grid. For pixel-perfect alignment with the basemap
+road network, run the OSRM snapping pass:
+
+```bash
+python3 preprocessing/snap_trips_to_roads.py
+# Or test against a subset first:
+python3 preprocessing/snap_trips_to_roads.py --max 100
+```
+
+This replaces each trip's path with the actual driving route between
+pickup and dropoff, snapped to real OSM roads via the public OSRM demo
+server. Failures fall back to the synthetic path so the file is always
+valid. Expect ~30-60 minutes to snap 2400 trips due to OSRM's rate limit.
+
 ---
 
 ## Architecture
@@ -115,7 +132,8 @@ the-carbon-clock-manhattan/
 │   ├── emissions.json               # 24 hourly emission snapshots
 │   └── airquality.json              # AQ stations + 24h profiles
 ├── preprocessing/
-│   ├── generate_synthetic_data.py   # stdlib-only, produces visually-convincing fake data
+│   ├── generate_synthetic_data.py   # stdlib-only synthetic generator; routes trips along a Manhattan grid model
+│   ├── snap_trips_to_roads.py       # optional: replace synthetic paths with real OSM road geometry via OSRM
 │   ├── process_taxi.py              # TLC Parquet -> trips.json
 │   ├── process_emissions.py         # NYC DOT CSV -> emissions.json
 │   ├── process_airquality.py        # OpenAQ v3 API -> airquality.json

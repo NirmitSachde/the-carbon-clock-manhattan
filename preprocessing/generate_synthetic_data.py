@@ -67,46 +67,32 @@ def grid_to_latlng(gx, gy):
 # roughly 80 m between adjacent avenue x-coordinates after the rotation
 # (real avenues are 250-300 ft apart). We pick a representative subset and
 # space them approximately to scale.
+# Avenue positions in grid x (perpendicular to avenue direction).
+# Origin is anchored at 5th Ave & 34th St, so 5th Ave sits at gx = 0.
+# Adjacent avenue blocks are ~270 m east-west (NYC's standard 900 ft block).
 AVENUE_X = [
     # x-coord (m), avenue label
-    (-1800, "12th Ave"),
-    (-1530, "11th Ave"),
-    (-1260, "10th Ave"),
-    (-990,  "9th Ave"),
-    (-720,  "8th Ave"),
-    (-450,  "7th Ave"),
-    (-180,  "Broadway/6th"),
-    (90,    "5th Ave"),
-    (360,   "Madison"),
-    (630,   "Park"),
-    (900,   "Lexington"),
-    (1170,  "3rd Ave"),
-    (1440,  "2nd Ave"),
-    (1710,  "1st Ave"),
-    (1980,  "FDR/York"),
+    (-1890, "12th Ave"),
+    (-1620, "11th Ave"),
+    (-1350, "10th Ave"),
+    (-1080, "9th Ave"),
+    (-810,  "8th Ave"),
+    (-540,  "7th Ave"),
+    (-270,  "6th Ave"),
+    (0,     "5th Ave"),
+    (270,   "Madison"),
+    (540,   "Park"),
+    (810,   "Lexington"),
+    (1080,  "3rd Ave"),
+    (1350,  "2nd Ave"),
+    (1620,  "1st Ave"),
+    (1890,  "York/FDR"),
 ]
 
-# Cross-streets. Manhattan blocks N-S average ~80 m between numbered streets.
-# We model every ~5 streets to keep the graph manageable (so trips have
-# ~8-15 intersections per ride, which looks like real driving).
-STREET_Y = [
-    # y-coord (m), street label
-    (-5200, "Battery"),       # ~ Battery Park
-    (-4400, "Wall St"),
-    (-3600, "Canal St"),
-    (-2800, "Houston"),
-    (-2000, "14th St"),
-    (-1200, "23rd St"),
-    (-400,  "34th St"),
-    (240,   "42nd St"),
-    (1040,  "57th St"),
-    (1840,  "72nd St"),
-    (2640,  "86th St"),
-    (3440,  "96th St"),
-    (4240,  "110th St"),
-    (5040,  "125th St"),
-    (5840,  "Harlem"),
-]
+# Cross-streets. Manhattan's N-S blocks are ~80 m. We model every ~3 blocks
+# (240 m spacing) so trips can turn at finer intervals and don't take
+# obvious "shortcuts" between sparse major streets.
+STREET_Y = [(y, f"st-{i}") for i, y in enumerate(range(-5400, 6000, 240))]
 
 # Build intersection node set.
 NODES = []     # list of (avenue_idx, street_idx, lng, lat)
