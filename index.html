@@ -94,6 +94,16 @@ html, body {
     margin-top: 4px;
     opacity: 0.6;
 }
+#title .provenance {
+    display: block;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    font-size: 9px;
+    letter-spacing: 0.6px;
+    margin-top: 6px;
+    opacity: 0.42;
+    color: var(--color-muted);
+}
 
 #time-display {
     position: fixed;
@@ -562,6 +572,7 @@ html, body {
 <div id="title">
     <span>The Carbon Clock</span><span class="sep">·</span><span>Manhattan</span>
     <span class="subtitle">24 hours of traffic, emissions, air quality</span>
+    <span class="provenance">January 2025 · NYC TLC · NYC DOT · OpenAQ</span>
 </div>
 
 <div id="time-display">
@@ -665,7 +676,7 @@ const HEATMAP_RADIUS_PX = 45;
 
 // Cache-buster appended to data fetches. Bump this whenever data/*.json change
 // so deployed visitors don't get served a stale JSON from their browser cache.
-const DATA_VERSION = "v6";
+const DATA_VERSION = "v7-real";
 
 // Three-tone palette (RGB)
 const TEAL  = [14, 210, 247];

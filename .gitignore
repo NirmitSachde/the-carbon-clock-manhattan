@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 *.parquet
 node_modules/
+
+# Raw downloaded source data (regenerable via the preprocessing scripts).
+# These can be hundreds of megabytes; they don't belong in git.
+raw/
