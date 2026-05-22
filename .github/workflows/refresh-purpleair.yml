@@ -1,0 +1,61 @@
+name: Refresh PurpleAir air-quality data
+
+# Every Monday at 03:00 UTC (~11 PM ET Sunday). PurpleAir history is a
+# rolling 7-day window, so weekly refresh keeps the visualization tied to
+# the most recent week of community-sensor measurements without burning
+# excessive API tokens (~10K tokens per run × 4 weeks ≈ 40K/month).
+#
+# Can also be triggered manually from the Actions tab via workflow_dispatch.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # so the bot can commit back to main
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          # Use the GITHUB_TOKEN of the workflow run so the subsequent
+          # push is authenticated against this repo.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # process_purpleair.py uses only the standard library (urllib + json
+      # + statistics). No pip install needed for the PurpleAir step.
+      # build_manifest.py is also stdlib-only.
+
+      - name: Refresh PurpleAir data
+        env:
+          PURPLEAIR_API_KEY: ${{ secrets.PURPLEAIR_API_KEY }}
+        run: |
+          if [ -z "$PURPLEAIR_API_KEY" ]; then
+            echo "::error::PURPLEAIR_API_KEY secret is not set on the repo."
+            echo "::error::Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          python3 preprocessing/process_purpleair.py
+
+      - name: Rebuild manifest
+        run: python3 preprocessing/build_manifest.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/airquality.json data/manifest.json
+          if git diff --cached --quiet; then
+            echo "No data changes — skipping commit."
+            exit 0
+          fi
+          PA=$(python3 -c "import json; print(sum(1 for s in json.load(open('data/airquality.json')) if s.get('source')=='purpleair'))")
+          git commit -m "Refresh PurpleAir data ($PA sensors, last 7 days)"
+          git push
