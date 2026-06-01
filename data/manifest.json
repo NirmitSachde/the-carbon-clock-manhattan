@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-26 19:19 UTC",
+  "generated_at": "2026-06-01 08:32 UTC",
   "layers": [
     {
       "key": "trips",
@@ -40,9 +40,9 @@
       "source_url": "https://aqs.epa.gov/aqsweb/airdata/download_files.html",
       "facts": {
         "Pollutants": "NO2, PM2.5",
-        "Total NYC monitors": 56,
+        "Total NYC monitors": 55,
         "  \u21b3 EPA federal": 5,
-        "  \u21b3 PurpleAir community": 51,
+        "  \u21b3 PurpleAir community": 50,
         "PM2.5 readings scanned": "26,940 (EPA) + 8,500+ (PurpleAir)",
         "NO\u2082 readings scanned": "11,145 (EPA only)",
         "PurpleAir averaging": "60-minute, last 7 days, atmospheric (outdoor-calibrated) PM2.5",
